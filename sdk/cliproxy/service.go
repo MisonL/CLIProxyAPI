@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,13 +16,13 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/executor"
-	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
+	internalusage "github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/wsrelay"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
-	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
+	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
 	log "github.com/sirupsen/logrus"
 )
@@ -56,6 +57,9 @@ type Service struct {
 
 	// server is the HTTP API server instance.
 	server *api.Server
+
+	// usagePersistence periodically saves usage statistics snapshots to disk.
+	usagePersistence *internalusage.PersistenceManager
 
 	// pprofServer manages the optional pprof HTTP debug server.
 	pprofServer *pprofServer
@@ -96,8 +100,8 @@ type Service struct {
 //
 // Parameters:
 //   - plugin: The usage plugin to register
-func (s *Service) RegisterUsagePlugin(plugin usage.Plugin) {
-	usage.RegisterPlugin(plugin)
+func (s *Service) RegisterUsagePlugin(plugin coreusage.Plugin) {
+	coreusage.RegisterPlugin(plugin)
 }
 
 // newDefaultAuthManager creates a default authentication manager with all supported providers.
@@ -465,7 +469,21 @@ func (s *Service) Run(ctx context.Context) error {
 		ctx = context.Background()
 	}
 
-	usage.StartDefault(ctx)
+	s.usagePersistence = internalusage.DefaultPersistenceManager()
+	if s.usagePersistence != nil {
+		s.usagePersistence.SetFilePath(resolveUsagePersistencePath(s.configPath, s.cfg))
+		if s.usagePersistence.Enabled() {
+			result, errLoad := s.usagePersistence.Load()
+			if errLoad != nil {
+				log.Warnf("failed to restore persisted usage snapshot from %s: %v", s.usagePersistence.FilePath(), errLoad)
+			} else if result.Added > 0 || result.Skipped > 0 {
+				log.Infof("restored persisted usage snapshot from %s (added=%d skipped=%d)", s.usagePersistence.FilePath(), result.Added, result.Skipped)
+			}
+			s.usagePersistence.Start(ctx)
+		}
+	}
+
+	coreusage.StartDefault(ctx)
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
@@ -558,9 +576,11 @@ func (s *Service) Run(ctx context.Context) error {
 	var watcherWrapper *WatcherWrapper
 	reloadCallback := func(newCfg *config.Config) {
 		previousStrategy := ""
+		previousPersistencePath := ""
 		s.cfgMu.RLock()
 		if s.cfg != nil {
 			previousStrategy = strings.ToLower(strings.TrimSpace(s.cfg.Routing.Strategy))
+			previousPersistencePath = resolveUsagePersistencePath(s.configPath, s.cfg)
 		}
 		s.cfgMu.RUnlock()
 
@@ -574,6 +594,7 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 
 		nextStrategy := strings.ToLower(strings.TrimSpace(newCfg.Routing.Strategy))
+		nextPersistencePath := resolveUsagePersistencePath(s.configPath, newCfg)
 		normalizeStrategy := func(strategy string) string {
 			switch strategy {
 			case "fill-first", "fillfirst", "ff":
@@ -597,6 +618,24 @@ func (s *Service) Run(ctx context.Context) error {
 
 		s.applyRetryConfig(newCfg)
 		s.applyPprofConfig(newCfg)
+		if s.usagePersistence != nil && previousPersistencePath != nextPersistencePath {
+			if previousPersistencePath != "" {
+				s.usagePersistence.SetFilePath(previousPersistencePath)
+				if errFlush := s.usagePersistence.Flush(); errFlush != nil {
+					log.Warnf("failed to flush usage persistence before path switch %s -> %s: %v", previousPersistencePath, nextPersistencePath, errFlush)
+				}
+			}
+			s.usagePersistence.SetFilePath(nextPersistencePath)
+			if nextPersistencePath != "" {
+				s.usagePersistence.Start(ctx)
+				if result, errLoad := s.usagePersistence.Load(); errLoad != nil {
+					log.Warnf("failed to restore usage snapshot after persistence path switch to %s: %v", nextPersistencePath, errLoad)
+				} else if result.Added > 0 || result.Skipped > 0 {
+					log.Infof("restored usage snapshot after persistence path switch to %s (added=%d skipped=%d)", nextPersistencePath, result.Added, result.Skipped)
+				}
+				s.usagePersistence.MarkDirty()
+			}
+		}
 		if s.server != nil {
 			s.server.UpdateClients(newCfg)
 		}
@@ -642,6 +681,27 @@ func (s *Service) Run(ctx context.Context) error {
 	case err = <-s.serverErr:
 		return err
 	}
+}
+
+func resolveUsagePersistencePath(configPath string, cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	raw := strings.TrimSpace(cfg.UsagePersistenceFile)
+	if raw == "" {
+		return ""
+	}
+	if filepath.IsAbs(raw) {
+		return raw
+	}
+	base := filepath.Dir(strings.TrimSpace(configPath))
+	if base == "" || base == "." {
+		if abs, err := filepath.Abs(raw); err == nil {
+			return abs
+		}
+		return filepath.Clean(raw)
+	}
+	return filepath.Clean(filepath.Join(base, raw))
 }
 
 // Shutdown gracefully stops background workers and the HTTP server.
@@ -710,7 +770,17 @@ func (s *Service) Shutdown(ctx context.Context) error {
 			}
 		}
 
-		usage.StopDefault()
+		coreusage.StopDefault()
+
+		if s.usagePersistence != nil {
+			if err := s.usagePersistence.Flush(); err != nil {
+				log.Errorf("failed to flush usage snapshot: %v", err)
+				if shutdownErr == nil {
+					shutdownErr = err
+				}
+			}
+			s.usagePersistence = nil
+		}
 	})
 	return shutdownErr
 }

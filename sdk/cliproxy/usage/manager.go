@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -45,6 +46,8 @@ type Manager struct {
 	once     sync.Once
 	stopOnce sync.Once
 	cancel   context.CancelFunc
+	done     chan struct{}
+	started  atomic.Bool
 
 	mu     sync.Mutex
 	cond   *sync.Cond
@@ -57,7 +60,9 @@ type Manager struct {
 
 // NewManager constructs a manager with a buffered queue.
 func NewManager(buffer int) *Manager {
-	m := &Manager{}
+	m := &Manager{
+		done: make(chan struct{}),
+	}
 	m.cond = sync.NewCond(&m.mu)
 	return m
 }
@@ -73,6 +78,7 @@ func (m *Manager) Start(ctx context.Context) {
 		}
 		var workerCtx context.Context
 		workerCtx, m.cancel = context.WithCancel(ctx)
+		m.started.Store(true)
 		go m.run(workerCtx)
 	})
 }
@@ -90,6 +96,11 @@ func (m *Manager) Stop() {
 		m.closed = true
 		m.mu.Unlock()
 		m.cond.Broadcast()
+		if !m.started.Load() {
+			close(m.done)
+			return
+		}
+		<-m.done
 	})
 }
 
@@ -122,6 +133,7 @@ func (m *Manager) Publish(ctx context.Context, record Record) {
 }
 
 func (m *Manager) run(ctx context.Context) {
+	defer close(m.done)
 	for {
 		m.mu.Lock()
 		for !m.closed && len(m.queue) == 0 {

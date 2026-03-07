@@ -64,6 +64,7 @@ type RequestStatistics struct {
 	successCount  int64
 	failureCount  int64
 	totalTokens   int64
+	revision      uint64
 
 	apis map[string]*apiStats
 
@@ -181,7 +182,6 @@ func (s *RequestStatistics) Record(ctx context.Context, record coreusage.Record)
 	hourKey := timestamp.Hour()
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	s.totalRequests++
 	if success {
@@ -190,6 +190,7 @@ func (s *RequestStatistics) Record(ctx context.Context, record coreusage.Record)
 		s.failureCount++
 	}
 	s.totalTokens += totalTokens
+	s.revision++
 
 	stats, ok := s.apis[statsKey]
 	if !ok {
@@ -208,6 +209,11 @@ func (s *RequestStatistics) Record(ctx context.Context, record coreusage.Record)
 	s.requestsByHour[hourKey]++
 	s.tokensByDay[dayKey] += totalTokens
 	s.tokensByHour[hourKey] += totalTokens
+	s.mu.Unlock()
+
+	if s == defaultRequestStatistics {
+		MarkDefaultPersistenceDirty()
+	}
 }
 
 func (s *RequestStatistics) updateAPIStats(stats *apiStats, model string, detail RequestDetail) {
@@ -225,9 +231,15 @@ func (s *RequestStatistics) updateAPIStats(stats *apiStats, model string, detail
 
 // Snapshot returns a copy of the aggregated metrics for external consumption.
 func (s *RequestStatistics) Snapshot() StatisticsSnapshot {
+	result, _ := s.SnapshotWithRevision()
+	return result
+}
+
+// SnapshotWithRevision returns a copy of the aggregated metrics plus the current mutation revision.
+func (s *RequestStatistics) SnapshotWithRevision() (StatisticsSnapshot, uint64) {
 	result := StatisticsSnapshot{}
 	if s == nil {
-		return result
+		return result, 0
 	}
 
 	s.mu.RLock()
@@ -279,7 +291,7 @@ func (s *RequestStatistics) Snapshot() StatisticsSnapshot {
 		result.TokensByHour[key] = v
 	}
 
-	return result
+	return result, s.revision
 }
 
 type MergeResult struct {
@@ -290,6 +302,10 @@ type MergeResult struct {
 // MergeSnapshot merges an exported statistics snapshot into the current store.
 // Existing data is preserved and duplicate request details are skipped.
 func (s *RequestStatistics) MergeSnapshot(snapshot StatisticsSnapshot) MergeResult {
+	return s.mergeSnapshot(snapshot, true)
+}
+
+func (s *RequestStatistics) mergeSnapshot(snapshot StatisticsSnapshot, markDirty bool) MergeResult {
 	result := MergeResult{}
 	if s == nil {
 		return result
@@ -347,6 +363,10 @@ func (s *RequestStatistics) MergeSnapshot(snapshot StatisticsSnapshot) MergeResu
 		}
 	}
 
+	if markDirty && result.Added > 0 && s == defaultRequestStatistics {
+		MarkDefaultPersistenceDirty()
+	}
+
 	return result
 }
 
@@ -363,6 +383,7 @@ func (s *RequestStatistics) recordImported(apiName, modelName string, stats *api
 		s.successCount++
 	}
 	s.totalTokens += totalTokens
+	s.revision++
 
 	s.updateAPIStats(stats, modelName, detail)
 

@@ -1,24 +1,13 @@
 package management
 
 import (
-	"encoding/json"
+	"errors"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
+	log "github.com/sirupsen/logrus"
 )
-
-type usageExportPayload struct {
-	Version    int                      `json:"version"`
-	ExportedAt time.Time                `json:"exported_at"`
-	Usage      usage.StatisticsSnapshot `json:"usage"`
-}
-
-type usageImportPayload struct {
-	Version int                      `json:"version"`
-	Usage   usage.StatisticsSnapshot `json:"usage"`
-}
 
 // GetUsageStatistics returns the in-memory request statistics snapshot.
 func (h *Handler) GetUsageStatistics(c *gin.Context) {
@@ -38,11 +27,7 @@ func (h *Handler) ExportUsageStatistics(c *gin.Context) {
 	if h != nil && h.usageStats != nil {
 		snapshot = h.usageStats.Snapshot()
 	}
-	c.JSON(http.StatusOK, usageExportPayload{
-		Version:    1,
-		ExportedAt: time.Now().UTC(),
-		Usage:      snapshot,
-	})
+	c.JSON(http.StatusOK, usage.NewExportPayload(snapshot))
 }
 
 // ImportUsageStatistics merges a previously exported usage snapshot into memory.
@@ -58,17 +43,22 @@ func (h *Handler) ImportUsageStatistics(c *gin.Context) {
 		return
 	}
 
-	var payload usageImportPayload
-	if err := json.Unmarshal(data, &payload); err != nil {
+	payload, err := usage.ParseImportPayload(data)
+	if err != nil {
+		if errors.Is(err, usage.ErrUnsupportedSnapshotVersion) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported version"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
-		return
-	}
-	if payload.Version != 0 && payload.Version != 1 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported version"})
 		return
 	}
 
 	result := h.usageStats.MergeSnapshot(payload.Usage)
+	if result.Added > 0 {
+		if err = usage.FlushDefaultPersistence(); err != nil {
+			log.Warnf("failed to flush usage persistence after import: %v", err)
+		}
+	}
 	snapshot := h.usageStats.Snapshot()
 	c.JSON(http.StatusOK, gin.H{
 		"added":           result.Added,
