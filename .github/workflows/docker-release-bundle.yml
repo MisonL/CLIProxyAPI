@@ -23,11 +23,15 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-          ref: ${{ github.event.inputs.release_ref || github.ref }}
+          ref: ${{ github.ref }}
 
       - name: Resolve release version
         run: |
-          echo "VERSION=$(git describe --tags --exact-match 2>/dev/null || git describe --tags --always --dirty)" >> "$GITHUB_ENV"
+          if [ -n "${{ github.event.inputs.release_ref || '' }}" ]; then
+            echo "VERSION=${{ github.event.inputs.release_ref }}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=$(git describe --tags --exact-match 2>/dev/null || git describe --tags --always --dirty)" >> "$GITHUB_ENV"
+          fi
 
       - name: Build Docker release bundle
         run: |
