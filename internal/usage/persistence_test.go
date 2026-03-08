@@ -42,6 +42,13 @@ func TestPersistenceManagerFlushAndLoad(t *testing.T) {
 	if err := manager.Flush(); err != nil {
 		t.Fatalf("Flush() error = %v", err)
 	}
+	flushStatus := manager.Status()
+	if flushStatus.LastFlushAt.IsZero() {
+		t.Fatalf("LastFlushAt is zero, want populated")
+	}
+	if flushStatus.LastError != "" {
+		t.Fatalf("LastError = %q, want empty", flushStatus.LastError)
+	}
 
 	if _, err := os.Stat(manager.FilePath()); err != nil {
 		t.Fatalf("expected snapshot file to exist: %v", err)
@@ -55,6 +62,19 @@ func TestPersistenceManagerFlushAndLoad(t *testing.T) {
 	}
 	if result.Added != 1 {
 		t.Fatalf("Load() added = %d, want 1", result.Added)
+	}
+	loadStatus := restoredManager.Status()
+	if loadStatus.LastLoadAt.IsZero() {
+		t.Fatalf("LastLoadAt is zero, want populated")
+	}
+	if loadStatus.LastLoadAdded != 1 {
+		t.Fatalf("LastLoadAdded = %d, want 1", loadStatus.LastLoadAdded)
+	}
+	if loadStatus.LastLoadSkipped != 0 {
+		t.Fatalf("LastLoadSkipped = %d, want 0", loadStatus.LastLoadSkipped)
+	}
+	if loadStatus.LastError != "" {
+		t.Fatalf("LastError = %q, want empty", loadStatus.LastError)
 	}
 
 	snapshot := restoredStats.Snapshot()
@@ -114,5 +134,25 @@ func TestPersistenceManagerFlushWritesExportPayload(t *testing.T) {
 	}
 	if payload.Usage.TotalRequests != 1 {
 		t.Fatalf("payload.Usage.TotalRequests = %d, want 1", payload.Usage.TotalRequests)
+	}
+}
+
+func TestPersistenceManagerLoadTracksLastError(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "usage-statistics.json")
+	if err := os.WriteFile(filePath, []byte(`{"version":99,"usage":{}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	manager := NewPersistenceManager(NewRequestStatistics(), filePath)
+	if _, err := manager.Load(); !errors.Is(err, ErrUnsupportedSnapshotVersion) {
+		t.Fatalf("Load() error = %v, want ErrUnsupportedSnapshotVersion", err)
+	}
+
+	status := manager.Status()
+	if status.LastError == "" {
+		t.Fatalf("LastError = empty, want populated")
+	}
+	if status.LastErrorAt.IsZero() {
+		t.Fatalf("LastErrorAt is zero, want populated")
 	}
 }

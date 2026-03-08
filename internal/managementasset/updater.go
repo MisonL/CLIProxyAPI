@@ -172,6 +172,24 @@ func FilePath(configFilePath string) string {
 	return filepath.Join(dir, ManagementFileName)
 }
 
+func localOverrideAssetExists() bool {
+	override := strings.TrimSpace(os.Getenv("MANAGEMENT_STATIC_PATH"))
+	if override == "" {
+		return false
+	}
+
+	path := filepath.Clean(override)
+	if !strings.EqualFold(filepath.Base(path), managementAssetName) {
+		path = filepath.Join(path, managementAssetName)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
+}
+
 // EnsureLatestManagementHTML checks the latest management.html asset and updates the local copy when needed.
 // It coalesces concurrent sync attempts and returns whether the asset exists after the sync attempt.
 func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL string, panelRepository string) bool {
@@ -185,6 +203,10 @@ func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL 
 		return false
 	}
 	localPath := filepath.Join(staticDir, managementAssetName)
+	if localOverrideAssetExists() {
+		log.Debug("management asset sync skipped: local override asset already present")
+		return true
+	}
 
 	_, _, _ = sfGroup.Do(localPath, func() (interface{}, error) {
 		lastUpdateCheckMu.Lock()

@@ -70,7 +70,18 @@ type PersistenceManager struct {
 	savedRev  atomic.Uint64
 	started   atomic.Bool
 
-	flushMu sync.Mutex
+	flushMu  sync.Mutex
+	statusMu sync.RWMutex
+	status   PersistenceRuntimeStatus
+}
+
+type PersistenceRuntimeStatus struct {
+	LastFlushAt     time.Time `json:"last_flush_at"`
+	LastLoadAt      time.Time `json:"last_load_at"`
+	LastLoadAdded   int64     `json:"last_load_added"`
+	LastLoadSkipped int64     `json:"last_load_skipped"`
+	LastError       string    `json:"last_error"`
+	LastErrorAt     time.Time `json:"last_error_at"`
 }
 
 // NewPersistenceManager creates a new snapshot persistence manager.
@@ -84,6 +95,30 @@ func NewPersistenceManager(stats *RequestStatistics, filePath string) *Persisten
 		savedSeq:  atomic.Uint64{},
 		started:   atomic.Bool{},
 	}
+}
+
+func (m *PersistenceManager) Status() PersistenceRuntimeStatus {
+	if m == nil {
+		return PersistenceRuntimeStatus{}
+	}
+	m.statusMu.RLock()
+	defer m.statusMu.RUnlock()
+	return m.status
+}
+
+func (m *PersistenceManager) setLastError(err error) {
+	if m == nil {
+		return
+	}
+	m.statusMu.Lock()
+	defer m.statusMu.Unlock()
+	if err == nil {
+		m.status.LastError = ""
+		m.status.LastErrorAt = time.Time{}
+		return
+	}
+	m.status.LastError = err.Error()
+	m.status.LastErrorAt = time.Now().UTC()
 }
 
 // Enabled reports whether snapshot persistence has a writable target path.
@@ -173,11 +208,13 @@ func (m *PersistenceManager) Load() (MergeResult, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			return result, nil
 		}
+		m.setLastError(err)
 		return result, err
 	}
 
 	payload, err := ParseImportPayload(data)
 	if err != nil {
+		m.setLastError(err)
 		return result, err
 	}
 
@@ -185,6 +222,13 @@ func (m *PersistenceManager) Load() (MergeResult, error) {
 	_, revision := m.stats.SnapshotWithRevision()
 	m.savedRev.Store(revision)
 	m.savedSeq.Store(m.changeSeq.Load())
+	m.statusMu.Lock()
+	m.status.LastLoadAt = time.Now().UTC()
+	m.status.LastLoadAdded = result.Added
+	m.status.LastLoadSkipped = result.Skipped
+	m.status.LastError = ""
+	m.status.LastErrorAt = time.Time{}
+	m.statusMu.Unlock()
 	return result, nil
 }
 
@@ -218,13 +262,20 @@ func (m *PersistenceManager) Flush() error {
 	payload := NewExportPayload(snapshot)
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
+		m.setLastError(err)
 		return err
 	}
 	if err = atomicWriteFile(path, data); err != nil {
+		m.setLastError(err)
 		return err
 	}
 	m.savedSeq.Store(targetSeq)
 	m.savedRev.Store(targetRevision)
+	m.statusMu.Lock()
+	m.status.LastFlushAt = time.Now().UTC()
+	m.status.LastError = ""
+	m.status.LastErrorAt = time.Time{}
+	m.statusMu.Unlock()
 	return nil
 }
 
