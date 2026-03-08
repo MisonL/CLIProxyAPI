@@ -4,10 +4,15 @@ on:
   push:
     tags:
       - v*
+  workflow_dispatch:
+    inputs:
+      release_ref:
+        description: 'Tag or branch ref to publish, for example v6.8.47-mf.1'
+        required: true
+        type: string
 
 env:
   APP_NAME: CLIProxyAPI
-  DOCKERHUB_REPO: eceasy/cli-proxy-api
 
 jobs:
   docker_amd64:
@@ -15,6 +20,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.event.inputs.release_ref || github.ref }}
+      - name: Resolve Docker publish target
+        run: echo "DOCKERHUB_REPO=${DOCKERHUB_REPO:-eceasy/cli-proxy-api}" >> "$GITHUB_ENV"
+        env:
+          DOCKERHUB_REPO: ${{ vars.DOCKERHUB_REPO }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Login to DockerHub
@@ -46,6 +59,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.event.inputs.release_ref || github.ref }}
+      - name: Resolve Docker publish target
+        run: echo "DOCKERHUB_REPO=${DOCKERHUB_REPO:-eceasy/cli-proxy-api}" >> "$GITHUB_ENV"
+        env:
+          DOCKERHUB_REPO: ${{ vars.DOCKERHUB_REPO }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Login to DockerHub
@@ -80,6 +101,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.event.inputs.release_ref || github.ref }}
+      - name: Resolve Docker publish target
+        run: echo "DOCKERHUB_REPO=${DOCKERHUB_REPO:-eceasy/cli-proxy-api}" >> "$GITHUB_ENV"
+        env:
+          DOCKERHUB_REPO: ${{ vars.DOCKERHUB_REPO }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Login to DockerHub
