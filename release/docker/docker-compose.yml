@@ -1,0 +1,18 @@
+services:
+  cli-proxy-api:
+    image: ${CLI_PROXY_IMAGE}
+    container_name: ${CLI_PROXY_CONTAINER_NAME:-cliproxyapi}
+    environment:
+      DEPLOY: ${DEPLOY:-}
+      MANAGEMENT_STATIC_PATH: ${MANAGEMENT_STATIC_PATH:-/workspace/static}
+      USAGE_BACKUP_DIR: ${USAGE_BACKUP_DIR:-/workspace/usage-backups}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "127.0.0.1:${CLI_PROXY_PUBLIC_PORT:-8317}:8317"
+    volumes:
+      - ./config/config.yaml:/CLIProxyAPI/config.yaml
+      - ./data/auths:/root/.cli-proxy-api
+      - ./data/logs:/CLIProxyAPI/logs
+      - ./data/static:/workspace/static
+      - ./data/usage-backups:/workspace/usage-backups
+    restart: unless-stopped

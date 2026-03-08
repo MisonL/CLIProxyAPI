@@ -1,0 +1,58 @@
+name: docker-release-bundle
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_ref:
+        description: 'Tag or branch ref to package, for example v6.8.47-mf.1'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.event.inputs.release_ref || github.ref }}
+
+      - name: Resolve release version
+        run: |
+          echo "VERSION=$(git describe --tags --exact-match 2>/dev/null || git describe --tags --always --dirty)" >> "$GITHUB_ENV"
+
+      - name: Build Docker release bundle
+        run: |
+          set -euo pipefail
+          package_root="dist/docker-release/cliproxyapi-release"
+          archive_name="CLIProxyAPI_docker_release_${VERSION#v}.tar.gz"
+
+          rm -rf dist/docker-release
+          mkdir -p "$package_root"
+          cp -R release/docker/. "$package_root/"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          env_file = Path("dist/docker-release/cliproxyapi-release/.env.example")
+          env_file.write_text(env_file.read_text().replace("__VERSION__", version))
+          PY
+          tar -czf "dist/${archive_name}" -C "dist/docker-release" "cliproxyapi-release"
+          ls -lh "dist/${archive_name}"
+
+      - name: Upload Docker release bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${VERSION}" "dist/CLIProxyAPI_docker_release_${VERSION#v}.tar.gz" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
