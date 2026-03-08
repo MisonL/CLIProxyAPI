@@ -126,3 +126,20 @@ func TestGetUsagePersistenceStatusReportsRuntimeState(t *testing.T) {
 		t.Fatalf("FilePath = %q, want %q", payload.FilePath, filePath)
 	}
 }
+
+func TestCheckLogDirSkipsWhenLoggingToFileDisabled(t *testing.T) {
+	h := &Handler{
+		cfg: &config.Config{
+			LoggingToFile: false,
+		},
+		logDir: filepath.Join(t.TempDir(), "missing-logs"),
+	}
+
+	item := h.checkLogDir()
+	if item.Status != selfCheckStatusOK {
+		t.Fatalf("Status = %q, want %q", item.Status, selfCheckStatusOK)
+	}
+	if item.Message != "文件日志已关闭，已跳过目录检查" {
+		t.Fatalf("Message = %q, want %q", item.Message, "文件日志已关闭，已跳过目录检查")
+	}
+}

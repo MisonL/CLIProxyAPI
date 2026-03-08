@@ -38,10 +38,22 @@ func TestBuildAuthFileEntry_IncludesQuotaRuntimeFields(t *testing.T) {
 	if reason, ok := entry["quota_reason"].(string); !ok || reason != "quota" {
 		t.Fatalf("expected quota_reason=quota, got %#v", entry["quota_reason"])
 	}
+	if exceeded, ok := entry["quotaExceeded"].(bool); !ok || !exceeded {
+		t.Fatalf("expected quotaExceeded=true, got %#v", entry["quotaExceeded"])
+	}
+	if reason, ok := entry["quotaReason"].(string); !ok || reason != "quota" {
+		t.Fatalf("expected quotaReason=quota, got %#v", entry["quotaReason"])
+	}
 	if recoverAt, ok := entry["quota_next_recover_at"].(time.Time); !ok || !recoverAt.Equal(now.Add(3*time.Hour)) {
 		t.Fatalf("expected quota_next_recover_at to be preserved, got %#v", entry["quota_next_recover_at"])
 	}
+	if recoverAt, ok := entry["quotaNextRecoverAt"].(time.Time); !ok || !recoverAt.Equal(now.Add(3*time.Hour)) {
+		t.Fatalf("expected quotaNextRecoverAt to be preserved, got %#v", entry["quotaNextRecoverAt"])
+	}
 	if backoff, ok := entry["quota_backoff_level"].(int); !ok || backoff != 2 {
 		t.Fatalf("expected quota_backoff_level=2, got %#v", entry["quota_backoff_level"])
+	}
+	if backoff, ok := entry["quotaBackoffLevel"].(int); !ok || backoff != 2 {
+		t.Fatalf("expected quotaBackoffLevel=2, got %#v", entry["quotaBackoffLevel"])
 	}
 }

@@ -62,6 +62,10 @@ func StartAutoUpdater(ctx context.Context, configFilePath string) {
 		log.Debug("management asset auto-updater skipped: empty config path")
 		return
 	}
+	if shouldSkipAutoUpdater(configFilePath) {
+		log.Debug("management asset auto-updater skipped: local management asset already present")
+		return
+	}
 
 	schedulerConfigPath.Store(configFilePath)
 
@@ -190,6 +194,26 @@ func localOverrideAssetExists() bool {
 	return !info.IsDir()
 }
 
+func localManagementAssetExists(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
+}
+
+func shouldSkipAutoUpdater(configFilePath string) bool {
+	if localOverrideAssetExists() {
+		return true
+	}
+	return localManagementAssetExists(FilePath(configFilePath))
+}
+
 // EnsureLatestManagementHTML checks the latest management.html asset and updates the local copy when needed.
 // It coalesces concurrent sync attempts and returns whether the asset exists after the sync attempt.
 func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL string, panelRepository string) bool {
@@ -205,6 +229,10 @@ func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL 
 	localPath := filepath.Join(staticDir, managementAssetName)
 	if localOverrideAssetExists() {
 		log.Debug("management asset sync skipped: local override asset already present")
+		return true
+	}
+	if localManagementAssetExists(localPath) {
+		log.Debug("management asset sync skipped: local management asset already present")
 		return true
 	}
 

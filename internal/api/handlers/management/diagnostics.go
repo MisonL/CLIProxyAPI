@@ -165,6 +165,14 @@ func (h *Handler) checkAuthDir() selfCheckItem {
 }
 
 func (h *Handler) checkLogDir() selfCheckItem {
+	if h != nil && h.cfg != nil && !h.cfg.LoggingToFile {
+		return selfCheckItem{
+			ID:      "log-dir",
+			Status:  selfCheckStatusOK,
+			Title:   "日志目录",
+			Message: "文件日志已关闭，已跳过目录检查",
+		}
+	}
 	logDir := strings.TrimSpace(h.logDir)
 	if logDir == "" && h.configFilePath != "" {
 		logDir = filepath.Join(filepath.Dir(h.configFilePath), "logs")

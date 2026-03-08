@@ -60,6 +60,17 @@ Get 10% OFF GLM CODING PLAN：https://z.ai/subscribe?ic=8JVLJQFSKB
 
 CLIProxyAPI Guides: [https://help.router-for.me/](https://help.router-for.me/)
 
+## Fork Versioning
+
+For this fork, formal releases use `v<upstream>-mf.<N>`.
+
+- Example: `v6.8.47-mf.1`
+- `mf` identifies this fork
+- `N` is the release number on top of the same upstream base
+
+When rebasing or re-integrating a newer upstream tag, restart the fork suffix from `.1`.
+Development builds may still use `git describe --tags --always`, but production builds should always carry an explicit release version.
+
 ## Management API
 
 see [MANAGEMENT_API.md](https://help.router-for.me/management/api)

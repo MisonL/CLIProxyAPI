@@ -374,15 +374,19 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 	}
 	if auth.Quota.Exceeded {
 		entry["quota_exceeded"] = true
+		entry["quotaExceeded"] = true
 	}
 	if auth.Quota.Reason != "" {
 		entry["quota_reason"] = auth.Quota.Reason
+		entry["quotaReason"] = auth.Quota.Reason
 	}
 	if !auth.Quota.NextRecoverAt.IsZero() {
 		entry["quota_next_recover_at"] = auth.Quota.NextRecoverAt
+		entry["quotaNextRecoverAt"] = auth.Quota.NextRecoverAt
 	}
 	if auth.Quota.BackoffLevel > 0 {
 		entry["quota_backoff_level"] = auth.Quota.BackoffLevel
+		entry["quotaBackoffLevel"] = auth.Quota.BackoffLevel
 	}
 	if email := authEmail(auth); email != "" {
 		entry["email"] = email
