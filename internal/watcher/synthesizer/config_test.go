@@ -17,12 +17,12 @@ func TestNewConfigSynthesizer(t *testing.T) {
 
 func TestConfigSynthesizer_Synthesize_NilContext(t *testing.T) {
 	synth := NewConfigSynthesizer()
-	auths, err := synth.Synthesize(nil)
+	credentials, err := synth.Synthesize(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 0 {
-		t.Fatalf("expected empty auths, got %d", len(auths))
+	if len(credentials) != 0 {
+		t.Fatalf("expected empty credentials, got %d", len(credentials))
 	}
 }
 
@@ -33,12 +33,12 @@ func TestConfigSynthesizer_Synthesize_NilConfig(t *testing.T) {
 		Now:         time.Now(),
 		IDGenerator: NewStableIDGenerator(),
 	}
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 0 {
-		t.Fatalf("expected empty auths, got %d", len(auths))
+	if len(credentials) != 0 {
+		t.Fatalf("expected empty credentials, got %d", len(credentials))
 	}
 }
 
@@ -55,21 +55,21 @@ func TestConfigSynthesizer_GeminiKeys(t *testing.T) {
 				{APIKey: "test-key-123", Prefix: "team-a"},
 			},
 			wantLen: 1,
-			validate: func(t *testing.T, auths []*coreauth.Auth) {
-				if auths[0].Provider != "gemini" {
-					t.Errorf("expected provider gemini, got %s", auths[0].Provider)
+			validate: func(t *testing.T, credentials []*coreauth.Auth) {
+				if credentials[0].Provider != "gemini" {
+					t.Errorf("expected provider gemini, got %s", credentials[0].Provider)
 				}
-				if auths[0].Prefix != "team-a" {
-					t.Errorf("expected prefix team-a, got %s", auths[0].Prefix)
+				if credentials[0].Prefix != "team-a" {
+					t.Errorf("expected prefix team-a, got %s", credentials[0].Prefix)
 				}
-				if auths[0].Label != "gemini-apikey" {
-					t.Errorf("expected label gemini-apikey, got %s", auths[0].Label)
+				if credentials[0].Label != "gemini-apikey" {
+					t.Errorf("expected label gemini-apikey, got %s", credentials[0].Label)
 				}
-				if auths[0].Attributes["api_key"] != "test-key-123" {
-					t.Errorf("expected api_key test-key-123, got %s", auths[0].Attributes["api_key"])
+				if credentials[0].Attributes["api_key"] != "test-key-123" {
+					t.Errorf("expected api_key test-key-123, got %s", credentials[0].Attributes["api_key"])
 				}
-				if auths[0].Status != coreauth.StatusActive {
-					t.Errorf("expected status active, got %s", auths[0].Status)
+				if credentials[0].Status != coreauth.StatusActive {
+					t.Errorf("expected status active, got %s", credentials[0].Status)
 				}
 			},
 		},
@@ -84,12 +84,12 @@ func TestConfigSynthesizer_GeminiKeys(t *testing.T) {
 				},
 			},
 			wantLen: 1,
-			validate: func(t *testing.T, auths []*coreauth.Auth) {
-				if auths[0].Attributes["base_url"] != "https://custom.api.com" {
-					t.Errorf("expected base_url https://custom.api.com, got %s", auths[0].Attributes["base_url"])
+			validate: func(t *testing.T, credentials []*coreauth.Auth) {
+				if credentials[0].Attributes["base_url"] != "https://custom.api.com" {
+					t.Errorf("expected base_url https://custom.api.com, got %s", credentials[0].Attributes["base_url"])
 				}
-				if auths[0].ProxyURL != "http://proxy.local:8080" {
-					t.Errorf("expected proxy_url http://proxy.local:8080, got %s", auths[0].ProxyURL)
+				if credentials[0].ProxyURL != "http://proxy.local:8080" {
+					t.Errorf("expected proxy_url http://proxy.local:8080, got %s", credentials[0].ProxyURL)
 				}
 			},
 		},
@@ -102,9 +102,9 @@ func TestConfigSynthesizer_GeminiKeys(t *testing.T) {
 				},
 			},
 			wantLen: 1,
-			validate: func(t *testing.T, auths []*coreauth.Auth) {
-				if auths[0].Attributes["header:X-Custom"] != "value" {
-					t.Errorf("expected header:X-Custom=value, got %s", auths[0].Attributes["header:X-Custom"])
+			validate: func(t *testing.T, credentials []*coreauth.Auth) {
+				if credentials[0].Attributes["header:X-Custom"] != "value" {
+					t.Errorf("expected header:X-Custom=value, got %s", credentials[0].Attributes["header:X-Custom"])
 				}
 			},
 		},
@@ -139,16 +139,16 @@ func TestConfigSynthesizer_GeminiKeys(t *testing.T) {
 				IDGenerator: NewStableIDGenerator(),
 			}
 
-			auths, err := synth.Synthesize(ctx)
+			credentials, err := synth.Synthesize(ctx)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if len(auths) != tt.wantLen {
-				t.Fatalf("expected %d auths, got %d", tt.wantLen, len(auths))
+			if len(credentials) != tt.wantLen {
+				t.Fatalf("expected %d credentials, got %d", tt.wantLen, len(credentials))
 			}
 
-			if tt.validate != nil && len(auths) > 0 {
-				tt.validate(t, auths)
+			if tt.validate != nil && len(credentials) > 0 {
+				tt.validate(t, credentials)
 			}
 		})
 	}
@@ -174,27 +174,27 @@ func TestConfigSynthesizer_ClaudeKeys(t *testing.T) {
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("expected 1 auth, got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(credentials))
 	}
 
-	if auths[0].Provider != "claude" {
-		t.Errorf("expected provider claude, got %s", auths[0].Provider)
+	if credentials[0].Provider != "claude" {
+		t.Errorf("expected provider claude, got %s", credentials[0].Provider)
 	}
-	if auths[0].Label != "claude-apikey" {
-		t.Errorf("expected label claude-apikey, got %s", auths[0].Label)
+	if credentials[0].Label != "claude-apikey" {
+		t.Errorf("expected label claude-apikey, got %s", credentials[0].Label)
 	}
-	if auths[0].Prefix != "main" {
-		t.Errorf("expected prefix main, got %s", auths[0].Prefix)
+	if credentials[0].Prefix != "main" {
+		t.Errorf("expected prefix main, got %s", credentials[0].Prefix)
 	}
-	if auths[0].Attributes["api_key"] != "sk-ant-api-xxx" {
-		t.Errorf("expected api_key sk-ant-api-xxx, got %s", auths[0].Attributes["api_key"])
+	if credentials[0].Attributes["api_key"] != "sk-ant-api-xxx" {
+		t.Errorf("expected api_key sk-ant-api-xxx, got %s", credentials[0].Attributes["api_key"])
 	}
-	if _, ok := auths[0].Attributes["models_hash"]; !ok {
+	if _, ok := credentials[0].Attributes["models_hash"]; !ok {
 		t.Error("expected models_hash in attributes")
 	}
 }
@@ -213,15 +213,15 @@ func TestConfigSynthesizer_ClaudeKeys_SkipsEmptyAndHeaders(t *testing.T) {
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("expected 1 auth (empty keys skipped), got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("expected 1 auth (empty keys skipped), got %d", len(credentials))
 	}
-	if auths[0].Attributes["header:X-Custom"] != "value" {
-		t.Errorf("expected header:X-Custom=value, got %s", auths[0].Attributes["header:X-Custom"])
+	if credentials[0].Attributes["header:X-Custom"] != "value" {
+		t.Errorf("expected header:X-Custom=value, got %s", credentials[0].Attributes["header:X-Custom"])
 	}
 }
 
@@ -243,25 +243,25 @@ func TestConfigSynthesizer_CodexKeys(t *testing.T) {
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("expected 1 auth, got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(credentials))
 	}
 
-	if auths[0].Provider != "codex" {
-		t.Errorf("expected provider codex, got %s", auths[0].Provider)
+	if credentials[0].Provider != "codex" {
+		t.Errorf("expected provider codex, got %s", credentials[0].Provider)
 	}
-	if auths[0].Label != "codex-apikey" {
-		t.Errorf("expected label codex-apikey, got %s", auths[0].Label)
+	if credentials[0].Label != "codex-apikey" {
+		t.Errorf("expected label codex-apikey, got %s", credentials[0].Label)
 	}
-	if auths[0].ProxyURL != "http://proxy.local" {
-		t.Errorf("expected proxy_url http://proxy.local, got %s", auths[0].ProxyURL)
+	if credentials[0].ProxyURL != "http://proxy.local" {
+		t.Errorf("expected proxy_url http://proxy.local, got %s", credentials[0].ProxyURL)
 	}
-	if auths[0].Attributes["websockets"] != "true" {
-		t.Errorf("expected websockets=true, got %s", auths[0].Attributes["websockets"])
+	if credentials[0].Attributes["websockets"] != "true" {
+		t.Errorf("expected websockets=true, got %s", credentials[0].Attributes["websockets"])
 	}
 }
 
@@ -279,15 +279,15 @@ func TestConfigSynthesizer_CodexKeys_SkipsEmptyAndHeaders(t *testing.T) {
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("expected 1 auth (empty keys skipped), got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("expected 1 auth (empty keys skipped), got %d", len(credentials))
 	}
-	if auths[0].Attributes["header:Authorization"] != "Bearer xyz" {
-		t.Errorf("expected header:Authorization=Bearer xyz, got %s", auths[0].Attributes["header:Authorization"])
+	if credentials[0].Attributes["header:Authorization"] != "Bearer xyz" {
+		t.Errorf("expected header:Authorization=Bearer xyz, got %s", credentials[0].Attributes["header:Authorization"])
 	}
 }
 
@@ -358,12 +358,12 @@ func TestConfigSynthesizer_OpenAICompat(t *testing.T) {
 				IDGenerator: NewStableIDGenerator(),
 			}
 
-			auths, err := synth.Synthesize(ctx)
+			credentials, err := synth.Synthesize(ctx)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if len(auths) != tt.wantLen {
-				t.Fatalf("expected %d auths, got %d", tt.wantLen, len(auths))
+			if len(credentials) != tt.wantLen {
+				t.Fatalf("expected %d credentials, got %d", tt.wantLen, len(credentials))
 			}
 		})
 	}
@@ -385,22 +385,22 @@ func TestConfigSynthesizer_VertexCompat(t *testing.T) {
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("expected 1 auth, got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(credentials))
 	}
 
-	if auths[0].Provider != "vertex" {
-		t.Errorf("expected provider vertex, got %s", auths[0].Provider)
+	if credentials[0].Provider != "vertex" {
+		t.Errorf("expected provider vertex, got %s", credentials[0].Provider)
 	}
-	if auths[0].Label != "vertex-apikey" {
-		t.Errorf("expected label vertex-apikey, got %s", auths[0].Label)
+	if credentials[0].Label != "vertex-apikey" {
+		t.Errorf("expected label vertex-apikey, got %s", credentials[0].Label)
 	}
-	if auths[0].Prefix != "vertex-prod" {
-		t.Errorf("expected prefix vertex-prod, got %s", auths[0].Prefix)
+	if credentials[0].Prefix != "vertex-prod" {
+		t.Errorf("expected prefix vertex-prod, got %s", credentials[0].Prefix)
 	}
 }
 
@@ -418,24 +418,24 @@ func TestConfigSynthesizer_VertexCompat_SkipsEmptyAndHeaders(t *testing.T) {
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Vertex compat doesn't skip empty keys - it creates auths without api_key attribute
-	if len(auths) != 3 {
-		t.Fatalf("expected 3 auths, got %d", len(auths))
+	// Vertex compat doesn't skip empty keys - it creates credentials without api_key attribute
+	if len(credentials) != 3 {
+		t.Fatalf("expected 3 credentials, got %d", len(credentials))
 	}
 	// First two should not have api_key attribute
-	if _, ok := auths[0].Attributes["api_key"]; ok {
+	if _, ok := credentials[0].Attributes["api_key"]; ok {
 		t.Error("expected first auth to not have api_key attribute")
 	}
-	if _, ok := auths[1].Attributes["api_key"]; ok {
+	if _, ok := credentials[1].Attributes["api_key"]; ok {
 		t.Error("expected second auth to not have api_key attribute")
 	}
 	// Third should have headers
-	if auths[2].Attributes["header:X-Vertex"] != "test" {
-		t.Errorf("expected header:X-Vertex=test, got %s", auths[2].Attributes["header:X-Vertex"])
+	if credentials[2].Attributes["header:X-Vertex"] != "test" {
+		t.Errorf("expected header:X-Vertex=test, got %s", credentials[2].Attributes["header:X-Vertex"])
 	}
 }
 
@@ -461,18 +461,18 @@ func TestConfigSynthesizer_OpenAICompat_WithModelsHash(t *testing.T) {
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("expected 1 auth, got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(credentials))
 	}
-	if _, ok := auths[0].Attributes["models_hash"]; !ok {
+	if _, ok := credentials[0].Attributes["models_hash"]; !ok {
 		t.Error("expected models_hash in attributes")
 	}
-	if auths[0].Attributes["api_key"] != "key-with-models" {
-		t.Errorf("expected api_key key-with-models, got %s", auths[0].Attributes["api_key"])
+	if credentials[0].Attributes["api_key"] != "key-with-models" {
+		t.Errorf("expected api_key key-with-models, got %s", credentials[0].Attributes["api_key"])
 	}
 }
 
@@ -496,18 +496,18 @@ func TestConfigSynthesizer_OpenAICompat_FallbackWithModels(t *testing.T) {
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("expected 1 auth, got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(credentials))
 	}
-	if _, ok := auths[0].Attributes["models_hash"]; !ok {
+	if _, ok := credentials[0].Attributes["models_hash"]; !ok {
 		t.Error("expected models_hash in fallback path")
 	}
-	if auths[0].Attributes["header:X-API"] != "header-value" {
-		t.Errorf("expected header:X-API=header-value, got %s", auths[0].Attributes["header:X-API"])
+	if credentials[0].Attributes["header:X-API"] != "header-value" {
+		t.Errorf("expected header:X-API=header-value, got %s", credentials[0].Attributes["header:X-API"])
 	}
 }
 
@@ -530,14 +530,14 @@ func TestConfigSynthesizer_VertexCompat_WithModels(t *testing.T) {
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("expected 1 auth, got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(credentials))
 	}
-	if _, ok := auths[0].Attributes["models_hash"]; !ok {
+	if _, ok := credentials[0].Attributes["models_hash"]; !ok {
 		t.Error("expected models_hash in vertex auth with models")
 	}
 }
@@ -595,16 +595,16 @@ func TestConfigSynthesizer_AllProviders(t *testing.T) {
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 5 {
-		t.Fatalf("expected 5 auths, got %d", len(auths))
+	if len(credentials) != 5 {
+		t.Fatalf("expected 5 credentials, got %d", len(credentials))
 	}
 
 	providers := make(map[string]bool)
-	for _, a := range auths {
+	for _, a := range credentials {
 		providers[a.Provider] = true
 	}
 

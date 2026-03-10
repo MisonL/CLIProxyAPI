@@ -55,7 +55,7 @@ func (Executor) Refresh(ctx context.Context, a *coreauth.Auth) (*coreauth.Auth, 
 在启动服务前将执行器注册到核心管理器：
 
 ```go
-core := coreauth.NewManager(coreauth.NewFileStore(cfg.AuthDir), nil, nil)
+core := coreauth.NewManager(coreauth.NewFileStore(cfg.CredentialsDir), nil, nil)
 core.RegisterExecutor(myprov.Executor{})
 svc, _ := cliproxy.NewBuilder().WithConfig(cfg).WithConfigPath(cfgPath).WithCoreAuthManager(core).Build()
 ```

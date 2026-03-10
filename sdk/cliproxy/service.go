@@ -7,13 +7,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/platform"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/executor"
 	internalusage "github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
@@ -93,6 +93,8 @@ type Service struct {
 
 	// wsGateway manages websocket Gemini providers.
 	wsGateway *wsrelay.Manager
+
+	platformRuntime *platform.Runtime
 }
 
 // RegisterUsagePlugin registers a usage plugin on the global usage manager.
@@ -191,6 +193,9 @@ func (s *Service) handleAuthUpdate(ctx context.Context, update watcher.AuthUpdat
 			return
 		}
 		s.applyCoreAuthAddOrUpdate(ctx, update.Auth)
+		if s.platformRuntime != nil {
+			_ = s.platformRuntime.SyncAuth(ctx, update.Auth)
+		}
 	case watcher.AuthUpdateActionDelete:
 		id := update.ID
 		if id == "" && update.Auth != nil {
@@ -200,6 +205,9 @@ func (s *Service) handleAuthUpdate(ctx context.Context, update watcher.AuthUpdat
 			return
 		}
 		s.applyCoreAuthRemoval(ctx, id)
+		if s.platformRuntime != nil {
+			_ = s.platformRuntime.DeleteAuth(ctx, id)
+		}
 	default:
 		log.Debugf("received unknown auth update action: %v", update.Action)
 	}
@@ -388,7 +396,7 @@ func (s *Service) ensureExecutorsForAuthWithMode(a *coreauth.Auth, forceReplace 
 		return
 	}
 	// Skip disabled auth entries when (re)binding executors.
-	// Disabled auths can linger during config reloads (e.g., removed OpenAI-compat entries)
+	// Disabled credentials can linger during config reloads (e.g., removed OpenAI-compat entries)
 	// and must not override active provider executors (such as iFlow OAuth accounts).
 	if a.Disabled {
 		return
@@ -439,9 +447,9 @@ func (s *Service) rebindExecutors() {
 	if s == nil || s.coreManager == nil {
 		return
 	}
-	auths := s.coreManager.List()
+	credentials := s.coreManager.List()
 	reboundCodex := false
-	for _, auth := range auths {
+	for _, auth := range credentials {
 		if auth != nil && strings.EqualFold(strings.TrimSpace(auth.Provider), "codex") {
 			if reboundCodex {
 				continue
@@ -493,24 +501,29 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 	}()
 
-	if err := s.ensureAuthDir(); err != nil {
-		return err
-	}
-
 	s.applyRetryConfig(s.cfg)
+
+	platformCfg := platform.LoadConfigFromEnv()
+	if !platformCfg.Enabled {
+		return fmt.Errorf("cliproxy: platform mode is required")
+	}
+	runtime, errPlatform := platform.NewRuntime(ctx, platformCfg)
+	if errPlatform != nil {
+		return fmt.Errorf("cliproxy: start platform runtime: %w", errPlatform)
+	}
+	s.platformRuntime = runtime
+	platform.RegisterUsagePlugin(runtime)
+	if s.coreManager != nil {
+		s.coreManager.SetStore(runtime)
+	}
+	if s.authManager != nil {
+		s.authManager.SetStore(runtime)
+	}
 
 	if s.coreManager != nil {
 		if errLoad := s.coreManager.Load(ctx); errLoad != nil {
 			log.Warnf("failed to load auth store: %v", errLoad)
 		}
-	}
-
-	tokenResult, err := s.tokenProvider.Load(ctx, s.cfg)
-	if err != nil && !errors.Is(err, context.Canceled) {
-		return err
-	}
-	if tokenResult == nil {
-		tokenResult = &TokenClientResult{}
 	}
 
 	apiKeyResult, err := s.apiKeyProvider.Load(ctx, s.cfg)
@@ -521,6 +534,24 @@ func (s *Service) Run(ctx context.Context) error {
 		apiKeyResult = &APIKeyClientResult{}
 	}
 
+	if s.coreManager != nil {
+		s.hydrateLoadedAuths()
+	}
+
+	if s.platformRuntime != nil {
+		if errBackfill := s.platformRuntime.BackfillCurrentUsage(ctx); errBackfill != nil {
+			log.WithError(errBackfill).Warn("platform: usage backfill failed")
+		}
+		if platformCfg.Role == "all" {
+			go func() {
+				if errWorker := s.platformRuntime.RunWorker(ctx); errWorker != nil && !errors.Is(errWorker, context.Canceled) {
+					log.WithError(errWorker).Error("platform: embedded worker stopped")
+				}
+			}()
+		}
+		s.serverOptions = append(s.serverOptions, api.WithPlatformRuntime(s.platformRuntime))
+	}
+
 	// legacy clients removed; no caches to refresh
 
 	// handlers no longer depend on legacy clients; pass nil slice initially
@@ -528,6 +559,9 @@ func (s *Service) Run(ctx context.Context) error {
 
 	if s.authManager == nil {
 		s.authManager = newDefaultAuthManager()
+	}
+	if s.platformRuntime != nil {
+		s.authManager.SetStore(s.platformRuntime)
 	}
 
 	s.ensureWebsocketGateway()
@@ -649,7 +683,7 @@ func (s *Service) Run(ctx context.Context) error {
 		s.rebindExecutors()
 	}
 
-	watcherWrapper, err = s.watcherFactory(s.configPath, s.cfg.AuthDir, reloadCallback)
+	watcherWrapper, err = s.watcherFactory(s.configPath, reloadCallback)
 	if err != nil {
 		return fmt.Errorf("cliproxy: failed to create watcher: %w", err)
 	}
@@ -665,7 +699,7 @@ func (s *Service) Run(ctx context.Context) error {
 	if err = watcherWrapper.Start(watcherCtx); err != nil {
 		return fmt.Errorf("cliproxy: failed to start watcher: %w", err)
 	}
-	log.Info("file watcher started for config and auth directory changes")
+	log.Info("file watcher started for config changes")
 
 	// Prefer core auth manager auto refresh if available.
 	if s.coreManager != nil {
@@ -781,26 +815,36 @@ func (s *Service) Shutdown(ctx context.Context) error {
 			}
 			s.usagePersistence = nil
 		}
+		if s.platformRuntime != nil {
+			if err := s.platformRuntime.Close(); err != nil {
+				log.Errorf("failed to close platform runtime: %v", err)
+				if shutdownErr == nil {
+					shutdownErr = err
+				}
+			}
+		}
 	})
 	return shutdownErr
 }
 
-func (s *Service) ensureAuthDir() error {
-	info, err := os.Stat(s.cfg.AuthDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			if mkErr := os.MkdirAll(s.cfg.AuthDir, 0o755); mkErr != nil {
-				return fmt.Errorf("cliproxy: failed to create auth directory %s: %w", s.cfg.AuthDir, mkErr)
-			}
-			log.Infof("created missing auth directory: %s", s.cfg.AuthDir)
-			return nil
+func (s *Service) SnapshotAuths() []*coreauth.Auth {
+	if s == nil || s.coreManager == nil {
+		return nil
+	}
+	return s.coreManager.List()
+}
+
+func (s *Service) hydrateLoadedAuths() {
+	if s == nil || s.coreManager == nil {
+		return
+	}
+	for _, auth := range s.coreManager.List() {
+		if auth == nil || auth.ID == "" {
+			continue
 		}
-		return fmt.Errorf("cliproxy: error checking auth directory %s: %w", s.cfg.AuthDir, err)
+		s.ensureExecutorsForAuth(auth)
+		s.registerModelsForAuth(auth)
 	}
-	if !info.IsDir() {
-		return fmt.Errorf("cliproxy: auth path exists but is not a directory: %s", s.cfg.AuthDir)
-	}
-	return nil
 }
 
 // registerModelsForAuth (re)binds provider models in the global registry using the core auth ID as client identifier.

@@ -13,17 +13,43 @@ builds:
     binary: cli-proxy-api
     ldflags:
       - -s -w -X 'main.Version={{.Version}}' -X 'main.Commit={{.ShortCommit}}' -X 'main.BuildDate={{.Date}}'
+
+  - id: "cliproxyapi-migrate"
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd/migrate/
+    binary: CLIProxyAPI-migrate
+
 archives:
   - id: "cli-proxy-api"
+    ids:
+      - cli-proxy-api
     format: tar.gz
     format_overrides:
       - goos: windows
         format: zip
+    name_template: '{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
     files:
       - LICENSE
       - README.md
       - README_CN.md
       - config.example.yaml
+
+  - id: "cliproxyapi-migrate"
+    ids:
+      - cliproxyapi-migrate
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: '{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
 
 checksum:
   name_template: 'checksums.txt'

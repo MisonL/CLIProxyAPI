@@ -71,18 +71,18 @@ func SetLogLevel(cfg *config.Config) {
 	}
 }
 
-// ResolveAuthDir normalizes the auth directory path for consistent reuse throughout the app.
+// ResolveCredentialsDir normalizes the credentials directory path for consistent reuse throughout the app.
 // It expands a leading tilde (~) to the user's home directory and returns a cleaned path.
-func ResolveAuthDir(authDir string) (string, error) {
-	if authDir == "" {
+func ResolveCredentialsDir(credentialsDir string) (string, error) {
+	if credentialsDir == "" {
 		return "", nil
 	}
-	if strings.HasPrefix(authDir, "~") {
+	if strings.HasPrefix(credentialsDir, "~") {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("resolve auth dir: %w", err)
 		}
-		remainder := strings.TrimPrefix(authDir, "~")
+		remainder := strings.TrimPrefix(credentialsDir, "~")
 		remainder = strings.TrimLeft(remainder, "/\\")
 		if remainder == "" {
 			return filepath.Clean(home), nil
@@ -90,12 +90,12 @@ func ResolveAuthDir(authDir string) (string, error) {
 		normalized := strings.ReplaceAll(remainder, "\\", "/")
 		return filepath.Clean(filepath.Join(home, filepath.FromSlash(normalized))), nil
 	}
-	return filepath.Clean(authDir), nil
+	return filepath.Clean(credentialsDir), nil
 }
 
-// CountAuthFiles returns the number of auth records available through the provided Store.
-// For filesystem-backed stores, this reflects the number of JSON auth files under the configured directory.
-func CountAuthFiles[T any](ctx context.Context, store interface {
+// CountCredentials returns the number of auth records available through the provided Store.
+// For filesystem-backed stores, this reflects the number of JSON credential files under the configured directory.
+func CountCredentials[T any](ctx context.Context, store interface {
 	List(context.Context) ([]T, error)
 }) int {
 	if store == nil {

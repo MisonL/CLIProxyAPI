@@ -23,9 +23,9 @@ func TestExportUsageStatisticsReturnsSnapshotPayload(t *testing.T) {
 					"gpt-5": {
 						Details: []usage.RequestDetail{
 							{
-								Timestamp: time.Date(2026, 3, 7, 21, 30, 0, 0, time.UTC),
-								Source:    "codex",
-								AuthIndex: "0",
+								Timestamp:    time.Date(2026, 3, 7, 21, 30, 0, 0, time.UTC),
+								Source:       "codex",
+								SelectionKey: "0",
 								Tokens: usage.TokenStats{
 									InputTokens:  10,
 									OutputTokens: 5,
@@ -71,7 +71,7 @@ func TestImportUsageStatisticsMergesSnapshot(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	body := bytes.NewBufferString(`{
-  "version": 1,
+  "version": 2,
   "usage": {
     "apis": {
       "test-key": {
@@ -81,7 +81,7 @@ func TestImportUsageStatisticsMergesSnapshot(t *testing.T) {
               {
                 "timestamp": "2026-03-07T22:00:00Z",
                 "source": "codex",
-                "auth_index": "1",
+                "selection_key": "1",
                 "tokens": {
                   "input_tokens": 8,
                   "output_tokens": 4,
@@ -121,6 +121,58 @@ func TestImportUsageStatisticsMergesSnapshot(t *testing.T) {
 	}
 	if snapshot.TotalTokens != 12 {
 		t.Fatalf("TotalTokens = %d, want 12", snapshot.TotalTokens)
+	}
+}
+
+func TestImportUsageStatisticsAcceptsLegacyV1Snapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	body := bytes.NewBufferString(`{
+  "version": 1,
+  "usage": {
+    "apis": {
+      "test-key": {
+        "models": {
+          "gpt-5": {
+            "details": [
+              {
+                "timestamp": "2026-03-07T22:00:00Z",
+                "source": "codex",
+                "auth_index": "legacy-1",
+                "tokens": {
+                  "input_tokens": 8,
+                  "output_tokens": 4,
+                  "total_tokens": 12
+                },
+                "failed": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}`)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/usage/import", body)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	stats := usage.NewRequestStatistics()
+	h := &Handler{usageStats: stats}
+	h.ImportUsageStatistics(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	snapshot := stats.Snapshot()
+	modelSnapshot := snapshot.APIs["test-key"].Models["gpt-5"]
+	if len(modelSnapshot.Details) != 1 {
+		t.Fatalf("details length = %d, want 1", len(modelSnapshot.Details))
+	}
+	if modelSnapshot.Details[0].SelectionKey != "legacy-1" {
+		t.Fatalf("SelectionKey = %q, want %q", modelSnapshot.Details[0].SelectionKey, "legacy-1")
 	}
 }
 

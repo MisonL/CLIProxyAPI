@@ -360,7 +360,7 @@ func (h *Handler) logDirectory() string {
 	if h.logDir != "" {
 		return h.logDir
 	}
-	return logging.ResolveLogDirectory(h.cfg)
+	return logging.ResolveLogDirectory(h.cfg, h.configFilePath)
 }
 
 func (h *Handler) collectLogFiles(dir string) ([]string, error) {

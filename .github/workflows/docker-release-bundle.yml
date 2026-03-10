@@ -1,9 +1,6 @@
 name: docker-release-bundle
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       release_ref:
@@ -23,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-          ref: ${{ github.ref }}
+          ref: ${{ github.event.inputs.release_ref || github.ref }}
 
       - name: Resolve release version
         run: |
@@ -34,24 +31,7 @@ jobs:
           fi
 
       - name: Build Docker release bundle
-        run: |
-          set -euo pipefail
-          package_root="dist/docker-release/cliproxyapi-release"
-          archive_name="CLIProxyAPI_docker_release_${VERSION#v}.tar.gz"
-
-          rm -rf dist/docker-release
-          mkdir -p "$package_root"
-          cp -R release/docker/. "$package_root/"
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-
-          version = os.environ["VERSION"]
-          env_file = Path("dist/docker-release/cliproxyapi-release/.env.example")
-          env_file.write_text(env_file.read_text().replace("__VERSION__", version))
-          PY
-          tar -czf "dist/${archive_name}" -C "dist/docker-release" "cliproxyapi-release"
-          ls -lh "dist/${archive_name}"
+        run: ./release/build-docker-release.sh "${VERSION}"
 
       - name: Upload Docker release bundle
         env:

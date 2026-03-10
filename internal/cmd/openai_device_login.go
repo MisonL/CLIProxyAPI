@@ -29,7 +29,12 @@ func DoCodexDeviceLogin(cfg *config.Config, options *LoginOptions) {
 		promptFn = defaultProjectPrompt()
 	}
 
-	manager := newAuthManager()
+	manager, closeStore, errStore := newAuthManager(cfg)
+	if errStore != nil {
+		fmt.Printf("Codex device authentication setup failed: %v\n", errStore)
+		return
+	}
+	defer closeStore()
 
 	authOpts := &sdkAuth.LoginOptions{
 		NoBrowser:    options.NoBrowser,
@@ -54,7 +59,7 @@ func DoCodexDeviceLogin(cfg *config.Config, options *LoginOptions) {
 	}
 
 	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
+		fmt.Printf("Credential saved as %s\n", savedPath)
 	}
 	fmt.Println("Codex device authentication successful!")
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// editableField represents an editable field on an auth file.
+// editableField represents an editable field on an credential file.
 type editableField struct {
 	label string
 	key   string // API field key: "prefix", "proxy_url", "priority"
@@ -49,6 +49,14 @@ type authFilesMsg struct {
 	err   error
 }
 
+type authFileDetailMsg struct {
+	index     int
+	file      map[string]any
+	fieldIdx  int
+	startEdit bool
+	err       error
+}
+
 type authActionMsg struct {
 	action string // "deleted", "toggled", "updated"
 	err    error
@@ -70,7 +78,7 @@ func (m authTabModel) Init() tea.Cmd {
 }
 
 func (m authTabModel) fetchFiles() tea.Msg {
-	files, err := m.client.GetAuthFiles()
+	files, err := m.client.GetCredentials()
 	return authFilesMsg{files: files, err: err}
 }
 
@@ -89,6 +97,21 @@ func (m authTabModel) Update(msg tea.Msg) (authTabModel, tea.Cmd) {
 				m.cursor = max(0, len(m.files)-1)
 			}
 			m.status = ""
+		}
+		m.viewport.SetContent(m.renderContent())
+		return m, nil
+
+	case authFileDetailMsg:
+		if msg.err != nil {
+			m.status = errorStyle.Render("✗ " + msg.err.Error())
+			m.viewport.SetContent(m.renderContent())
+			return m, nil
+		}
+		if msg.index >= 0 && msg.index < len(m.files) && msg.file != nil {
+			m.files[msg.index] = msg.file
+		}
+		if msg.startEdit {
+			return m, m.startEdit(msg.fieldIdx)
 		}
 		m.viewport.SetContent(m.renderContent())
 		return m, nil
@@ -123,10 +146,13 @@ func (m authTabModel) Update(msg tea.Msg) (authTabModel, tea.Cmd) {
 	return m, cmd
 }
 
-// startEdit activates inline editing for a field on the currently selected auth file.
+// startEdit activates inline editing for a field on the currently selected credential file.
 func (m *authTabModel) startEdit(fieldIdx int) tea.Cmd {
 	if m.cursor >= len(m.files) {
 		return nil
+	}
+	if getBool(m.files[m.cursor], "platform_backed") && !getBool(m.files[m.cursor], "detail_loaded") {
+		return m.fetchDetail(m.cursor, true, fieldIdx)
 	}
 	f := m.files[m.cursor]
 	m.editFileName = getString(f, "name")
@@ -141,6 +167,23 @@ func (m *authTabModel) startEdit(fieldIdx int) tea.Cmd {
 	m.editInput.Prompt = fmt.Sprintf("  %s: ", authEditableFields[fieldIdx].label)
 	m.viewport.SetContent(m.renderContent())
 	return textinput.Blink
+}
+
+func (m authTabModel) fetchDetail(index int, startEdit bool, fieldIdx int) tea.Cmd {
+	if index < 0 || index >= len(m.files) {
+		return nil
+	}
+	file := m.files[index]
+	return func() tea.Msg {
+		detail, err := m.client.GetCredentialDetail(file)
+		return authFileDetailMsg{
+			index:     index,
+			file:      detail,
+			fieldIdx:  fieldIdx,
+			startEdit: startEdit,
+			err:       err,
+		}
+	}
 }
 
 func (m *authTabModel) SetSize(w, h int) {
@@ -275,8 +318,9 @@ func (m authTabModel) renderDetail(f map[string]any) string {
 		{"Email", "email", false},
 		{"Status", "status", false},
 		{"Status Msg", "status_message", false},
-		{"File Name", "file_name", false},
-		{"Auth Type", "auth_type", false},
+		{"Credential Name", "credential_name", false},
+		{"Runtime ID", "runtime_id", false},
+		{"Selection Key", "selection_key", false},
 		{"Prefix", "prefix", true},
 		{"Proxy URL", "proxy_url", true},
 		{"Priority", "priority", true},
@@ -347,8 +391,9 @@ func (m authTabModel) handleEditInput(msg tea.KeyMsg) (authTabModel, tea.Cmd) {
 		} else {
 			fields[fieldKey] = value
 		}
+		file := m.files[m.cursor]
 		return m, func() tea.Msg {
-			err := m.client.PatchAuthFileFields(fileName, fields)
+			err := m.client.PatchCredentialFields(file, fields)
 			if err != nil {
 				return authActionMsg{err: err}
 			}
@@ -374,8 +419,9 @@ func (m authTabModel) handleConfirmInput(msg tea.KeyMsg) (authTabModel, tea.Cmd)
 		m.confirm = -1
 		if idx < len(m.files) {
 			name := getString(m.files[idx], "name")
+			file := m.files[idx]
 			return m, func() tea.Msg {
-				err := m.client.DeleteAuthFile(name)
+				err := m.client.DeleteCredential(file)
 				if err != nil {
 					return authActionMsg{err: err}
 				}
@@ -409,8 +455,14 @@ func (m authTabModel) handleNormalInput(msg tea.KeyMsg) (authTabModel, tea.Cmd) 
 	case "enter", " ":
 		if m.expanded == m.cursor {
 			m.expanded = -1
+			m.viewport.SetContent(m.renderContent())
+			return m, nil
 		} else {
 			m.expanded = m.cursor
+			if getBool(m.files[m.cursor], "platform_backed") && !getBool(m.files[m.cursor], "detail_loaded") {
+				m.viewport.SetContent(m.renderContent())
+				return m, m.fetchDetail(m.cursor, false, 0)
+			}
 		}
 		m.viewport.SetContent(m.renderContent())
 		return m, nil
@@ -427,7 +479,7 @@ func (m authTabModel) handleNormalInput(msg tea.KeyMsg) (authTabModel, tea.Cmd) 
 			disabled := getBool(f, "disabled")
 			newDisabled := !disabled
 			return m, func() tea.Msg {
-				err := m.client.ToggleAuthFile(name, newDisabled)
+				err := m.client.ToggleCredential(f, newDisabled)
 				if err != nil {
 					return authActionMsg{err: err}
 				}

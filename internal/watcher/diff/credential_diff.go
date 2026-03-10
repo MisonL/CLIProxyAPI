@@ -1,4 +1,4 @@
-// auth_diff.go computes human-readable diffs for auth file field changes.
+// auth_diff.go computes human-readable diffs for credential file field changes.
 package diff
 
 import (

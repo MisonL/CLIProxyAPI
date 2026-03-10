@@ -122,7 +122,7 @@ func isDirWritable(dir string) bool {
 }
 
 // ResolveLogDirectory determines the directory used for application logs.
-func ResolveLogDirectory(cfg *config.Config) string {
+func ResolveLogDirectory(cfg *config.Config, configPath ...string) string {
 	logDir := "logs"
 	if base := util.WritablePath(); base != "" {
 		return filepath.Join(base, "logs")
@@ -131,13 +131,13 @@ func ResolveLogDirectory(cfg *config.Config) string {
 		return logDir
 	}
 	if !isDirWritable(logDir) {
-		authDir, err := util.ResolveAuthDir(cfg.AuthDir)
-		if err != nil {
-			log.Warnf("Failed to resolve auth-dir %q for log directory: %v", cfg.AuthDir, err)
+		base := "."
+		if len(configPath) > 0 {
+			if candidate := strings.TrimSpace(configPath[0]); candidate != "" {
+				base = filepath.Dir(candidate)
+			}
 		}
-		if authDir != "" {
-			logDir = filepath.Join(authDir, "logs")
-		}
+		logDir = filepath.Join(base, "logs")
 	}
 	return logDir
 }

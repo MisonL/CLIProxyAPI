@@ -52,14 +52,14 @@ func ExtractBXAuth(cookie string) string {
 	return ""
 }
 
-// CheckDuplicateBXAuth checks if the given BXAuth value already exists in any iflow auth file.
+// CheckDuplicateBXAuth checks if the given BXAuth value already exists in any iflow credential file.
 // Returns the path of the existing file if found, empty string otherwise.
-func CheckDuplicateBXAuth(authDir, bxAuth string) (string, error) {
+func CheckDuplicateBXAuth(credentialsDir, bxAuth string) (string, error) {
 	if bxAuth == "" {
 		return "", nil
 	}
 
-	entries, err := os.ReadDir(authDir)
+	entries, err := os.ReadDir(credentialsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil
@@ -76,7 +76,7 @@ func CheckDuplicateBXAuth(authDir, bxAuth string) (string, error) {
 			continue
 		}
 
-		filePath := filepath.Join(authDir, name)
+		filePath := filepath.Join(credentialsDir, name)
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			continue

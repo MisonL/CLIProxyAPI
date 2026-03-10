@@ -28,7 +28,7 @@ type LoginOptions struct {
 
 // DoCodexLogin triggers the Codex OAuth flow through the shared authentication manager.
 // It initiates the OAuth authentication process for OpenAI Codex services and saves
-// the authentication tokens to the configured auth directory.
+// the authentication tokens to the configured credentials directory.
 //
 // Parameters:
 //   - cfg: The application configuration
@@ -43,7 +43,12 @@ func DoCodexLogin(cfg *config.Config, options *LoginOptions) {
 		promptFn = defaultProjectPrompt()
 	}
 
-	manager := newAuthManager()
+	manager, closeStore, errStore := newAuthManager(cfg)
+	if errStore != nil {
+		fmt.Printf("Codex authentication setup failed: %v\n", errStore)
+		return
+	}
+	defer closeStore()
 
 	authOpts := &sdkAuth.LoginOptions{
 		NoBrowser:    options.NoBrowser,
@@ -66,7 +71,7 @@ func DoCodexLogin(cfg *config.Config, options *LoginOptions) {
 	}
 
 	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
+		fmt.Printf("Credential saved as %s\n", savedPath)
 	}
 	fmt.Println("Codex authentication successful!")
 }

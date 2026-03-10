@@ -24,7 +24,7 @@ import (
 
 const (
 	objectStoreConfigKey  = "config/config.yaml"
-	objectStoreAuthPrefix = "auths"
+	objectStoreAuthPrefix = "credentials"
 )
 
 // ObjectStoreConfig captures configuration for the object storage-backed token store.
@@ -47,7 +47,7 @@ type ObjectTokenStore struct {
 	cfg        ObjectStoreConfig
 	spoolRoot  string
 	configPath string
-	authDir    string
+	credentialsDir    string
 	mu         sync.Mutex
 }
 
@@ -86,13 +86,13 @@ func NewObjectTokenStore(cfg ObjectStoreConfig) (*ObjectTokenStore, error) {
 	}
 
 	configDir := filepath.Join(absRoot, "config")
-	authDir := filepath.Join(absRoot, "auths")
+	credentialsDir := filepath.Join(absRoot, "credentials")
 
 	if err = os.MkdirAll(configDir, 0o700); err != nil {
 		return nil, fmt.Errorf("object store: create config directory: %w", err)
 	}
-	if err = os.MkdirAll(authDir, 0o700); err != nil {
-		return nil, fmt.Errorf("object store: create auth directory: %w", err)
+	if err = os.MkdirAll(credentialsDir, 0o700); err != nil {
+		return nil, fmt.Errorf("object store: create credentials directory: %w", err)
 	}
 
 	options := &minio.Options{
@@ -114,7 +114,7 @@ func NewObjectTokenStore(cfg ObjectStoreConfig) (*ObjectTokenStore, error) {
 		cfg:        cfg,
 		spoolRoot:  absRoot,
 		configPath: filepath.Join(configDir, "config.yaml"),
-		authDir:    authDir,
+		credentialsDir:    credentialsDir,
 	}, nil
 }
 
@@ -130,12 +130,12 @@ func (s *ObjectTokenStore) ConfigPath() string {
 	return s.configPath
 }
 
-// AuthDir returns the local directory containing mirrored auth files.
-func (s *ObjectTokenStore) AuthDir() string {
+// CredentialsDir returns the local directory containing mirrored credential files.
+func (s *ObjectTokenStore) CredentialsDir() string {
 	if s == nil {
 		return ""
 	}
-	return s.authDir
+	return s.credentialsDir
 }
 
 // Bootstrap ensures the target bucket exists and synchronizes data from the object storage backend.
@@ -179,7 +179,7 @@ func (s *ObjectTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (s
 	defer s.mu.Unlock()
 
 	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", fmt.Errorf("object store: create auth directory: %w", err)
+		return "", fmt.Errorf("object store: create credentials directory: %w", err)
 	}
 
 	switch {
@@ -201,10 +201,10 @@ func (s *ObjectTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (s
 		}
 		tmp := path + ".tmp"
 		if errWrite := os.WriteFile(tmp, raw, 0o600); errWrite != nil {
-			return "", fmt.Errorf("object store: write temp auth file: %w", errWrite)
+			return "", fmt.Errorf("object store: write temp credential file: %w", errWrite)
 		}
 		if errRename := os.Rename(tmp, path); errRename != nil {
-			return "", fmt.Errorf("object store: rename auth file: %w", errRename)
+			return "", fmt.Errorf("object store: rename credential file: %w", errRename)
 		}
 	default:
 		return "", fmt.Errorf("object store: nothing to persist for %s", auth.ID)
@@ -227,9 +227,9 @@ func (s *ObjectTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (s
 
 // List enumerates auth JSON files from the mirrored workspace.
 func (s *ObjectTokenStore) List(_ context.Context) ([]*cliproxyauth.Auth, error) {
-	dir := strings.TrimSpace(s.AuthDir())
+	dir := strings.TrimSpace(s.CredentialsDir())
 	if dir == "" {
-		return nil, fmt.Errorf("object store: auth directory not configured")
+		return nil, fmt.Errorf("object store: credentials directory not configured")
 	}
 	entries := make([]*cliproxyauth.Auth, 0, 32)
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
@@ -253,12 +253,12 @@ func (s *ObjectTokenStore) List(_ context.Context) ([]*cliproxyauth.Auth, error)
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("object store: walk auth directory: %w", err)
+		return nil, fmt.Errorf("object store: walk credentials directory: %w", err)
 	}
 	return entries, nil
 }
 
-// Delete removes an auth file locally and remotely.
+// Delete removes an credential file locally and remotely.
 func (s *ObjectTokenStore) Delete(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -273,7 +273,7 @@ func (s *ObjectTokenStore) Delete(ctx context.Context, id string) error {
 	defer s.mu.Unlock()
 
 	if err = os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("object store: delete auth file: %w", err)
+		return fmt.Errorf("object store: delete credential file: %w", err)
 	}
 	if err = s.deleteAuthObject(ctx, path); err != nil {
 		return err
@@ -281,8 +281,8 @@ func (s *ObjectTokenStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// PersistAuthFiles uploads the provided auth files to the object storage backend.
-func (s *ObjectTokenStore) PersistAuthFiles(ctx context.Context, _ string, paths ...string) error {
+// PersistCredentials uploads the provided credential files to the object storage backend.
+func (s *ObjectTokenStore) PersistCredentials(ctx context.Context, _ string, paths ...string) error {
 	if len(paths) == 0 {
 		return nil
 	}
@@ -297,7 +297,7 @@ func (s *ObjectTokenStore) PersistAuthFiles(ctx context.Context, _ string, paths
 		}
 		abs := trimmed
 		if !filepath.IsAbs(abs) {
-			abs = filepath.Join(s.authDir, trimmed)
+			abs = filepath.Join(s.credentialsDir, trimmed)
 		}
 		if err := s.uploadAuth(ctx, abs); err != nil {
 			return err
@@ -390,8 +390,8 @@ func (s *ObjectTokenStore) syncAuthFromBucket(ctx context.Context) error {
 	// Wiping the directory triggers file watcher delete events, which then
 	// propagate deletions to the remote object store (race condition).
 	// Instead, we just ensure the directory exists and overwrite files incrementally.
-	if err := os.MkdirAll(s.authDir, 0o700); err != nil {
-		return fmt.Errorf("object store: create auth directory: %w", err)
+	if err := os.MkdirAll(s.credentialsDir, 0o700); err != nil {
+		return fmt.Errorf("object store: create credentials directory: %w", err)
 	}
 
 	prefix := s.prefixedKey(objectStoreAuthPrefix + "/")
@@ -417,7 +417,7 @@ func (s *ObjectTokenStore) syncAuthFromBucket(ctx context.Context) error {
 			log.WithField("key", object.Key).Warn("object store: skip auth outside mirror")
 			continue
 		}
-		local := filepath.Join(s.authDir, cleanRel)
+		local := filepath.Join(s.credentialsDir, cleanRel)
 		if err := os.MkdirAll(filepath.Dir(local), 0o700); err != nil {
 			return fmt.Errorf("object store: prepare auth subdir: %w", err)
 		}
@@ -441,7 +441,7 @@ func (s *ObjectTokenStore) uploadAuth(ctx context.Context, path string) error {
 	if path == "" {
 		return nil
 	}
-	rel, err := filepath.Rel(s.authDir, path)
+	rel, err := filepath.Rel(s.credentialsDir, path)
 	if err != nil {
 		return fmt.Errorf("object store: resolve auth relative path: %w", err)
 	}
@@ -450,7 +450,7 @@ func (s *ObjectTokenStore) uploadAuth(ctx context.Context, path string) error {
 		if errors.Is(err, fs.ErrNotExist) {
 			return s.deleteAuthObject(ctx, path)
 		}
-		return fmt.Errorf("object store: read auth file: %w", err)
+		return fmt.Errorf("object store: read credential file: %w", err)
 	}
 	if len(data) == 0 {
 		return s.deleteAuthObject(ctx, path)
@@ -463,7 +463,7 @@ func (s *ObjectTokenStore) deleteAuthObject(ctx context.Context, path string) er
 	if path == "" {
 		return nil
 	}
-	rel, err := filepath.Rel(s.authDir, path)
+	rel, err := filepath.Rel(s.credentialsDir, path)
 	if err != nil {
 		return fmt.Errorf("object store: resolve auth relative path: %w", err)
 	}
@@ -515,7 +515,7 @@ func (s *ObjectTokenStore) resolveAuthPath(auth *cliproxyauth.Auth) (string, err
 			if filepath.IsAbs(path) {
 				return path, nil
 			}
-			return filepath.Join(s.authDir, path), nil
+			return filepath.Join(s.credentialsDir, path), nil
 		}
 	}
 	fileName := strings.TrimSpace(auth.FileName)
@@ -528,7 +528,7 @@ func (s *ObjectTokenStore) resolveAuthPath(auth *cliproxyauth.Auth) (string, err
 	if !strings.HasSuffix(strings.ToLower(fileName), ".json") {
 		fileName += ".json"
 	}
-	return filepath.Join(s.authDir, fileName), nil
+	return filepath.Join(s.credentialsDir, fileName), nil
 }
 
 func (s *ObjectTokenStore) resolveDeletePath(id string) (string, error) {
@@ -540,7 +540,7 @@ func (s *ObjectTokenStore) resolveDeletePath(id string) (string, error) {
 	if filepath.IsAbs(id) {
 		return id, nil
 	}
-	// Treat any non-absolute id (including nested like "team/foo") as relative to the mirror authDir.
+	// Treat any non-absolute id (including nested like "team/foo") as relative to the mirror credentialsDir.
 	// Normalize separators and guard against path traversal.
 	clean := filepath.Clean(filepath.FromSlash(id))
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
@@ -550,7 +550,7 @@ func (s *ObjectTokenStore) resolveDeletePath(id string) (string, error) {
 	if !strings.HasSuffix(strings.ToLower(clean), ".json") {
 		clean += ".json"
 	}
-	return filepath.Join(s.authDir, clean), nil
+	return filepath.Join(s.credentialsDir, clean), nil
 }
 
 func (s *ObjectTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth, error) {
@@ -571,7 +571,7 @@ func (s *ObjectTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Aut
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, fmt.Errorf("stat auth file: %w", err)
+		return nil, fmt.Errorf("stat credential file: %w", err)
 	}
 	rel, errRel := filepath.Rel(baseDir, path)
 	if errRel != nil {

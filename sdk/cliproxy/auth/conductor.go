@@ -101,7 +101,7 @@ type Result struct {
 
 // Selector chooses an auth candidate for execution.
 type Selector interface {
-	Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, auths []*Auth) (*Auth, error)
+	Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, credentials []*Auth) (*Auth, error)
 }
 
 // Hook captures lifecycle callbacks for observing auth changes.
@@ -128,12 +128,12 @@ func (NoopHook) OnResult(context.Context, Result) {}
 
 // Manager orchestrates auth lifecycle, selection, execution, and persistence.
 type Manager struct {
-	store     Store
-	executors map[string]ProviderExecutor
-	selector  Selector
-	hook      Hook
-	mu        sync.RWMutex
-	auths     map[string]*Auth
+	store       Store
+	executors   map[string]ProviderExecutor
+	selector    Selector
+	hook        Hook
+	mu          sync.RWMutex
+	credentials map[string]*Auth
 	// providerOffsets tracks per-model provider rotation state for multi-provider routing.
 	providerOffsets map[string]int
 
@@ -145,7 +145,7 @@ type Manager struct {
 	// oauthModelAlias stores global OAuth model alias mappings (alias -> upstream name) keyed by channel.
 	oauthModelAlias atomic.Value
 
-	// apiKeyModelAlias caches resolved model alias mappings for API-key auths.
+	// apiKeyModelAlias caches resolved model alias mappings for API-key credentials.
 	// Keyed by auth.ID, value is alias(lower) -> upstream model (including suffix).
 	apiKeyModelAlias atomic.Value
 
@@ -174,7 +174,7 @@ func NewManager(store Store, selector Selector, hook Hook) *Manager {
 		executors:        make(map[string]ProviderExecutor),
 		selector:         selector,
 		hook:             hook,
-		auths:            make(map[string]*Auth),
+		credentials:      make(map[string]*Auth),
 		providerOffsets:  make(map[string]int),
 		refreshSemaphore: make(chan struct{}, refreshMaxConcurrency),
 	}
@@ -285,7 +285,7 @@ func (m *Manager) rebuildAPIKeyModelAliasLocked(cfg *internalconfig.Config) {
 	}
 
 	out := make(apiKeyModelAliasTable)
-	for _, auth := range m.auths {
+	for _, auth := range m.credentials {
 		if auth == nil {
 			continue
 		}
@@ -447,9 +447,9 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	if auth.ID == "" {
 		auth.ID = uuid.NewString()
 	}
-	auth.EnsureIndex()
+	auth.EnsureSelectionKey()
 	m.mu.Lock()
-	m.auths[auth.ID] = auth.Clone()
+	m.credentials[auth.ID] = auth.Clone()
 	m.mu.Unlock()
 	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
 	_ = m.persist(ctx, auth)
@@ -463,7 +463,7 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 		return nil, nil
 	}
 	m.mu.Lock()
-	if existing, ok := m.auths[auth.ID]; ok && existing != nil {
+	if existing, ok := m.credentials[auth.ID]; ok && existing != nil {
 		if !auth.indexAssigned && auth.Index == "" {
 			auth.Index = existing.Index
 			auth.indexAssigned = existing.indexAssigned
@@ -472,8 +472,8 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 			auth.ModelStates = existing.ModelStates
 		}
 	}
-	auth.EnsureIndex()
-	m.auths[auth.ID] = auth.Clone()
+	auth.EnsureSelectionKey()
+	m.credentials[auth.ID] = auth.Clone()
 	m.mu.Unlock()
 	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
 	_ = m.persist(ctx, auth)
@@ -492,13 +492,13 @@ func (m *Manager) Load(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	m.auths = make(map[string]*Auth, len(items))
+	m.credentials = make(map[string]*Auth, len(items))
 	for _, auth := range items {
 		if auth == nil || auth.ID == "" {
 			continue
 		}
-		auth.EnsureIndex()
-		m.auths[auth.ID] = auth.Clone()
+		auth.EnsureSelectionKey()
+		m.credentials[auth.ID] = auth.Clone()
 	}
 	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
 	if cfg == nil {
@@ -1166,7 +1166,7 @@ func (m *Manager) closestCooldownWait(providers []string, model string, attempt 
 		found   bool
 		minWait time.Duration
 	)
-	for _, auth := range m.auths {
+	for _, auth := range m.credentials {
 		if auth == nil {
 			continue
 		}
@@ -1247,7 +1247,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	setModelQuota := false
 
 	m.mu.Lock()
-	if auth, ok := m.auths[result.AuthID]; ok && auth != nil {
+	if auth, ok := m.credentials[result.AuthID]; ok && auth != nil {
 		now := time.Now()
 
 		if result.Success {
@@ -1623,8 +1623,8 @@ func nextQuotaCooldown(prevLevel int, disableCooling bool) (time.Duration, int) 
 func (m *Manager) List() []*Auth {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	list := make([]*Auth, 0, len(m.auths))
-	for _, auth := range m.auths {
+	list := make([]*Auth, 0, len(m.credentials))
+	for _, auth := range m.credentials {
 		list = append(list, auth.Clone())
 	}
 	return list
@@ -1638,7 +1638,7 @@ func (m *Manager) GetByID(id string) (*Auth, bool) {
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	auth, ok := m.auths[id]
+	auth, ok := m.credentials[id]
 	if !ok {
 		return nil, false
 	}
@@ -1701,7 +1701,7 @@ func (m *Manager) pickNext(ctx context.Context, provider, model string, opts cli
 		m.mu.RUnlock()
 		return nil, nil, &Error{Code: "executor_not_found", Message: "executor not registered"}
 	}
-	candidates := make([]*Auth, 0, len(m.auths))
+	candidates := make([]*Auth, 0, len(m.credentials))
 	modelKey := strings.TrimSpace(model)
 	// Always use base model name (without thinking suffix) for auth matching.
 	if modelKey != "" {
@@ -1711,7 +1711,7 @@ func (m *Manager) pickNext(ctx context.Context, provider, model string, opts cli
 		}
 	}
 	registryRef := registry.GetGlobalRegistry()
-	for _, candidate := range m.auths {
+	for _, candidate := range m.credentials {
 		if candidate.Provider != provider || candidate.Disabled {
 			continue
 		}
@@ -1743,8 +1743,8 @@ func (m *Manager) pickNext(ctx context.Context, provider, model string, opts cli
 	m.mu.RUnlock()
 	if !selected.indexAssigned {
 		m.mu.Lock()
-		if current := m.auths[authCopy.ID]; current != nil && !current.indexAssigned {
-			current.EnsureIndex()
+		if current := m.credentials[authCopy.ID]; current != nil && !current.indexAssigned {
+			current.EnsureSelectionKey()
 			authCopy = current.Clone()
 		}
 		m.mu.Unlock()
@@ -1768,7 +1768,7 @@ func (m *Manager) pickNextMixed(ctx context.Context, providers []string, model s
 	}
 
 	m.mu.RLock()
-	candidates := make([]*Auth, 0, len(m.auths))
+	candidates := make([]*Auth, 0, len(m.credentials))
 	modelKey := strings.TrimSpace(model)
 	// Always use base model name (without thinking suffix) for auth matching.
 	if modelKey != "" {
@@ -1778,7 +1778,7 @@ func (m *Manager) pickNextMixed(ctx context.Context, providers []string, model s
 		}
 	}
 	registryRef := registry.GetGlobalRegistry()
-	for _, candidate := range m.auths {
+	for _, candidate := range m.credentials {
 		if candidate == nil || candidate.Disabled {
 			continue
 		}
@@ -1826,8 +1826,8 @@ func (m *Manager) pickNextMixed(ctx context.Context, providers []string, model s
 	m.mu.RUnlock()
 	if !selected.indexAssigned {
 		m.mu.Lock()
-		if current := m.auths[authCopy.ID]; current != nil && !current.indexAssigned {
-			current.EnsureIndex()
+		if current := m.credentials[authCopy.ID]; current != nil && !current.indexAssigned {
+			current.EnsureSelectionKey()
 			authCopy = current.Clone()
 		}
 		m.mu.Unlock()
@@ -1847,7 +1847,7 @@ func (m *Manager) persist(ctx context.Context, auth *Auth) error {
 			return nil
 		}
 	}
-	// Skip persistence when metadata is absent (e.g., runtime-only auths).
+	// Skip persistence when metadata is absent (e.g., runtime-only credentials).
 	if auth.Metadata == nil {
 		return nil
 	}
@@ -1931,8 +1931,8 @@ func (m *Manager) refreshAuthWithLimit(ctx context.Context, id string) {
 func (m *Manager) snapshotAuths() []*Auth {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]*Auth, 0, len(m.auths))
-	for _, a := range m.auths {
+	out := make([]*Auth, 0, len(m.credentials))
+	for _, a := range m.credentials {
 		out = append(out, a.Clone())
 	}
 	return out
@@ -2146,7 +2146,7 @@ func lookupMetadataTime(meta map[string]any, keys ...string) (time.Time, bool) {
 func (m *Manager) markRefreshPending(id string, now time.Time) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	auth, ok := m.auths[id]
+	auth, ok := m.credentials[id]
 	if !ok || auth == nil || auth.Disabled {
 		return false
 	}
@@ -2154,7 +2154,7 @@ func (m *Manager) markRefreshPending(id string, now time.Time) bool {
 		return false
 	}
 	auth.NextRefreshAfter = now.Add(refreshPendingBackoff)
-	m.auths[id] = auth
+	m.credentials[id] = auth
 	return true
 }
 
@@ -2163,7 +2163,7 @@ func (m *Manager) refreshAuth(ctx context.Context, id string) {
 		ctx = context.Background()
 	}
 	m.mu.RLock()
-	auth := m.auths[id]
+	auth := m.credentials[id]
 	var exec ProviderExecutor
 	if auth != nil {
 		exec = m.executors[auth.Provider]
@@ -2182,10 +2182,10 @@ func (m *Manager) refreshAuth(ctx context.Context, id string) {
 	now := time.Now()
 	if err != nil {
 		m.mu.Lock()
-		if current := m.auths[id]; current != nil {
+		if current := m.credentials[id]; current != nil {
 			current.NextRefreshAfter = now.Add(refreshFailureBackoff)
 			current.LastError = &Error{Message: err.Error()}
-			m.auths[id] = current
+			m.credentials[id] = current
 		}
 		m.mu.Unlock()
 		return
@@ -2325,7 +2325,7 @@ func (m *Manager) InjectCredentials(req *http.Request, authID string) error {
 		return nil
 	}
 	m.mu.RLock()
-	a := m.auths[authID]
+	a := m.credentials[authID]
 	var exec ProviderExecutor
 	if a != nil {
 		exec = m.executors[executorKeyFromAuth(a)]

@@ -8,8 +8,8 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
 )
 
-func defaultWatcherFactory(configPath, authDir string, reload func(*config.Config)) (*WatcherWrapper, error) {
-	w, err := watcher.NewWatcher(configPath, authDir, reload)
+func defaultWatcherFactory(configPath string, reload func(*config.Config)) (*WatcherWrapper, error) {
+	w, err := watcher.NewWatcher(configPath, reload)
 	if err != nil {
 		return nil, err
 	}

@@ -1,10 +1,9 @@
-// Package watcher watches config/auth files and triggers hot reloads.
+// Package watcher watches config files and runtime auth updates.
 // It supports cross-platform fsnotify event handling.
 package watcher
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,25 +12,12 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"gopkg.in/yaml.v3"
 
-	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
-	log "github.com/sirupsen/logrus"
 )
 
-// storePersister captures persistence-capable token store methods used by the watcher.
-type storePersister interface {
-	PersistConfig(ctx context.Context) error
-	PersistAuthFiles(ctx context.Context, message string, paths ...string) error
-}
-
-type authDirProvider interface {
-	AuthDir() string
-}
-
-// Watcher manages file watching for configuration and authentication files
+// Watcher manages config hot reloads and auth update queue dispatching.
 type Watcher struct {
 	configPath        string
-	authDir           string
 	config            *config.Config
 	clientsMutex      sync.RWMutex
 	configReloadMu    sync.Mutex
@@ -43,9 +29,6 @@ type Watcher struct {
 	stopped           atomic.Bool
 	reloadCallback    func(*config.Config)
 	watcher           *fsnotify.Watcher
-	lastAuthHashes    map[string]string
-	lastAuthContents  map[string]*coreauth.Auth
-	lastRemoveTimes   map[string]time.Time
 	lastConfigHash    string
 	authQueue         chan<- AuthUpdate
 	currentAuths      map[string]*coreauth.Auth
@@ -55,8 +38,6 @@ type Watcher struct {
 	pendingUpdates    map[string]AuthUpdate
 	pendingOrder      []string
 	dispatchCancel    context.CancelFunc
-	storePersister    storePersister
-	mirroredAuthDir   string
 	oldConfigYaml     []byte
 }
 
@@ -77,49 +58,31 @@ type AuthUpdate struct {
 }
 
 const (
-	// replaceCheckDelay is a short delay to allow atomic replace (rename) to settle
-	// before deciding whether a Remove event indicates a real deletion.
-	replaceCheckDelay        = 50 * time.Millisecond
-	configReloadDebounce     = 150 * time.Millisecond
-	authRemoveDebounceWindow = 1 * time.Second
-	serverUpdateDebounce     = 1 * time.Second
+	configReloadDebounce = 150 * time.Millisecond
+	serverUpdateDebounce = 1 * time.Second
 )
 
-// NewWatcher creates a new file watcher instance
-func NewWatcher(configPath, authDir string, reloadCallback func(*config.Config)) (*Watcher, error) {
+// NewWatcher creates a new file watcher instance.
+func NewWatcher(configPath string, reloadCallback func(*config.Config)) (*Watcher, error) {
 	watcher, errNewWatcher := fsnotify.NewWatcher()
 	if errNewWatcher != nil {
 		return nil, errNewWatcher
 	}
 	w := &Watcher{
 		configPath:     configPath,
-		authDir:        authDir,
 		reloadCallback: reloadCallback,
 		watcher:        watcher,
-		lastAuthHashes: make(map[string]string),
 	}
 	w.dispatchCond = sync.NewCond(&w.dispatchMu)
-	if store := sdkAuth.GetTokenStore(); store != nil {
-		if persister, ok := store.(storePersister); ok {
-			w.storePersister = persister
-			log.Debug("persistence-capable token store detected; watcher will propagate persisted changes")
-		}
-		if provider, ok := store.(authDirProvider); ok {
-			if fixed := strings.TrimSpace(provider.AuthDir()); fixed != "" {
-				w.mirroredAuthDir = fixed
-				log.Debugf("mirrored auth directory locked to %s", fixed)
-			}
-		}
-	}
 	return w, nil
 }
 
-// Start begins watching the configuration file and authentication directory
+// Start begins watching the configuration file.
 func (w *Watcher) Start(ctx context.Context) error {
 	return w.start(ctx)
 }
 
-// Stop stops the file watcher
+// Stop stops the file watcher.
 func (w *Watcher) Stop() error {
 	w.stopped.Store(true)
 	w.stopDispatch()
@@ -128,7 +91,7 @@ func (w *Watcher) Stop() error {
 	return w.watcher.Close()
 }
 
-// SetConfig updates the current configuration
+// SetConfig updates the current configuration.
 func (w *Watcher) SetConfig(cfg *config.Config) {
 	w.clientsMutex.Lock()
 	defer w.clientsMutex.Unlock()
@@ -141,9 +104,8 @@ func (w *Watcher) SetAuthUpdateQueue(queue chan<- AuthUpdate) {
 	w.setAuthUpdateQueue(queue)
 }
 
-// DispatchRuntimeAuthUpdate allows external runtime providers (e.g., websocket-driven auths)
-// to push auth updates through the same queue used by file/config watchers.
-// Returns true if the update was enqueued; false if no queue is configured.
+// DispatchRuntimeAuthUpdate allows external runtime providers to push auth updates
+// through the same queue used by config reloads.
 func (w *Watcher) DispatchRuntimeAuthUpdate(update AuthUpdate) bool {
 	return w.dispatchRuntimeAuthUpdate(update)
 }
@@ -153,5 +115,5 @@ func (w *Watcher) SnapshotCoreAuths() []*coreauth.Auth {
 	w.clientsMutex.RLock()
 	cfg := w.config
 	w.clientsMutex.RUnlock()
-	return snapshotCoreAuths(cfg, w.authDir)
+	return snapshotCoreAuths(cfg)
 }

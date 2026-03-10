@@ -16,13 +16,13 @@ func TestFillFirstSelectorPick_Deterministic(t *testing.T) {
 	t.Parallel()
 
 	selector := &FillFirstSelector{}
-	auths := []*Auth{
+	credentials := []*Auth{
 		{ID: "b"},
 		{ID: "a"},
 		{ID: "c"},
 	}
 
-	got, err := selector.Pick(context.Background(), "gemini", "", cliproxyexecutor.Options{}, auths)
+	got, err := selector.Pick(context.Background(), "gemini", "", cliproxyexecutor.Options{}, credentials)
 	if err != nil {
 		t.Fatalf("Pick() error = %v", err)
 	}
@@ -38,7 +38,7 @@ func TestRoundRobinSelectorPick_CyclesDeterministic(t *testing.T) {
 	t.Parallel()
 
 	selector := &RoundRobinSelector{}
-	auths := []*Auth{
+	credentials := []*Auth{
 		{ID: "b"},
 		{ID: "a"},
 		{ID: "c"},
@@ -46,7 +46,7 @@ func TestRoundRobinSelectorPick_CyclesDeterministic(t *testing.T) {
 
 	want := []string{"a", "b", "c", "a", "b"}
 	for i, id := range want {
-		got, err := selector.Pick(context.Background(), "gemini", "", cliproxyexecutor.Options{}, auths)
+		got, err := selector.Pick(context.Background(), "gemini", "", cliproxyexecutor.Options{}, credentials)
 		if err != nil {
 			t.Fatalf("Pick() #%d error = %v", i, err)
 		}
@@ -63,7 +63,7 @@ func TestRoundRobinSelectorPick_PriorityBuckets(t *testing.T) {
 	t.Parallel()
 
 	selector := &RoundRobinSelector{}
-	auths := []*Auth{
+	credentials := []*Auth{
 		{ID: "c", Attributes: map[string]string{"priority": "0"}},
 		{ID: "a", Attributes: map[string]string{"priority": "10"}},
 		{ID: "b", Attributes: map[string]string{"priority": "10"}},
@@ -71,7 +71,7 @@ func TestRoundRobinSelectorPick_PriorityBuckets(t *testing.T) {
 
 	want := []string{"a", "b", "a", "b"}
 	for i, id := range want {
-		got, err := selector.Pick(context.Background(), "mixed", "", cliproxyexecutor.Options{}, auths)
+		got, err := selector.Pick(context.Background(), "mixed", "", cliproxyexecutor.Options{}, credentials)
 		if err != nil {
 			t.Fatalf("Pick() #%d error = %v", i, err)
 		}
@@ -124,7 +124,7 @@ func TestFillFirstSelectorPick_PriorityFallbackCooldown(t *testing.T) {
 
 func TestRoundRobinSelectorPick_Concurrent(t *testing.T) {
 	selector := &RoundRobinSelector{}
-	auths := []*Auth{
+	credentials := []*Auth{
 		{ID: "b"},
 		{ID: "a"},
 		{ID: "c"},
@@ -142,7 +142,7 @@ func TestRoundRobinSelectorPick_Concurrent(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for j := 0; j < iterations; j++ {
-				got, err := selector.Pick(context.Background(), "gemini", "", cliproxyexecutor.Options{}, auths)
+				got, err := selector.Pick(context.Background(), "gemini", "", cliproxyexecutor.Options{}, credentials)
 				if err != nil {
 					select {
 					case errCh <- err:
@@ -184,7 +184,7 @@ func TestSelectorPick_AllCooldownReturnsModelCooldownError(t *testing.T) {
 	model := "test-model"
 	now := time.Now()
 	next := now.Add(60 * time.Second)
-	auths := []*Auth{
+	credentials := []*Auth{
 		{
 			ID: "a",
 			ModelStates: map[string]*ModelState{
@@ -219,7 +219,7 @@ func TestSelectorPick_AllCooldownReturnsModelCooldownError(t *testing.T) {
 		t.Parallel()
 
 		selector := &FillFirstSelector{}
-		_, err := selector.Pick(context.Background(), "mixed", model, cliproxyexecutor.Options{}, auths)
+		_, err := selector.Pick(context.Background(), "mixed", model, cliproxyexecutor.Options{}, credentials)
 		if err == nil {
 			t.Fatalf("Pick() error = nil")
 		}
@@ -257,7 +257,7 @@ func TestSelectorPick_AllCooldownReturnsModelCooldownError(t *testing.T) {
 		t.Parallel()
 
 		selector := &FillFirstSelector{}
-		_, err := selector.Pick(context.Background(), "gemini", model, cliproxyexecutor.Options{}, auths)
+		_, err := selector.Pick(context.Background(), "gemini", model, cliproxyexecutor.Options{}, credentials)
 		if err == nil {
 			t.Fatalf("Pick() error = nil")
 		}
@@ -355,16 +355,16 @@ func TestRoundRobinSelectorPick_ThinkingSuffixSharesCursor(t *testing.T) {
 	t.Parallel()
 
 	selector := &RoundRobinSelector{}
-	auths := []*Auth{
+	credentials := []*Auth{
 		{ID: "b"},
 		{ID: "a"},
 	}
 
-	first, err := selector.Pick(context.Background(), "gemini", "test-model(high)", cliproxyexecutor.Options{}, auths)
+	first, err := selector.Pick(context.Background(), "gemini", "test-model(high)", cliproxyexecutor.Options{}, credentials)
 	if err != nil {
 		t.Fatalf("Pick() first error = %v", err)
 	}
-	second, err := selector.Pick(context.Background(), "gemini", "test-model(low)", cliproxyexecutor.Options{}, auths)
+	second, err := selector.Pick(context.Background(), "gemini", "test-model(low)", cliproxyexecutor.Options{}, credentials)
 	if err != nil {
 		t.Fatalf("Pick() second error = %v", err)
 	}
@@ -383,11 +383,11 @@ func TestRoundRobinSelectorPick_CursorKeyCap(t *testing.T) {
 	t.Parallel()
 
 	selector := &RoundRobinSelector{maxKeys: 2}
-	auths := []*Auth{{ID: "a"}}
+	credentials := []*Auth{{ID: "a"}}
 
-	_, _ = selector.Pick(context.Background(), "gemini", "m1", cliproxyexecutor.Options{}, auths)
-	_, _ = selector.Pick(context.Background(), "gemini", "m2", cliproxyexecutor.Options{}, auths)
-	_, _ = selector.Pick(context.Background(), "gemini", "m3", cliproxyexecutor.Options{}, auths)
+	_, _ = selector.Pick(context.Background(), "gemini", "m1", cliproxyexecutor.Options{}, credentials)
+	_, _ = selector.Pick(context.Background(), "gemini", "m2", cliproxyexecutor.Options{}, credentials)
+	_, _ = selector.Pick(context.Background(), "gemini", "m3", cliproxyexecutor.Options{}, credentials)
 
 	selector.mu.Lock()
 	defer selector.mu.Unlock()
@@ -411,7 +411,7 @@ func TestRoundRobinSelectorPick_GeminiCLICredentialGrouping(t *testing.T) {
 	// Simulate two gemini-cli credentials, each with multiple projects:
 	// Credential A (parent = "cred-a.json") has 3 projects
 	// Credential B (parent = "cred-b.json") has 2 projects
-	auths := []*Auth{
+	credentials := []*Auth{
 		{ID: "cred-a.json::proj-a1", Attributes: map[string]string{"gemini_virtual_parent": "cred-a.json"}},
 		{ID: "cred-a.json::proj-a2", Attributes: map[string]string{"gemini_virtual_parent": "cred-a.json"}},
 		{ID: "cred-a.json::proj-a3", Attributes: map[string]string{"gemini_virtual_parent": "cred-a.json"}},
@@ -425,7 +425,7 @@ func TestRoundRobinSelectorPick_GeminiCLICredentialGrouping(t *testing.T) {
 	picks := make([]string, 6)
 	parents := make([]string, 6)
 	for i := 0; i < 6; i++ {
-		got, err := selector.Pick(context.Background(), "gemini-cli", "gemini-2.5-pro", cliproxyexecutor.Options{}, auths)
+		got, err := selector.Pick(context.Background(), "gemini-cli", "gemini-2.5-pro", cliproxyexecutor.Options{}, credentials)
 		if err != nil {
 			t.Fatalf("Pick() #%d error = %v", i, err)
 		}
@@ -463,9 +463,9 @@ func TestRoundRobinSelectorPick_SingleParentFallsBackToFlat(t *testing.T) {
 
 	selector := &RoundRobinSelector{}
 
-	// All auths from the same parent - should fall back to flat round-robin
+	// All credentials from the same parent - should fall back to flat round-robin
 	// because there's only one credential group (no benefit from two-level).
-	auths := []*Auth{
+	credentials := []*Auth{
 		{ID: "cred-a.json::proj-a1", Attributes: map[string]string{"gemini_virtual_parent": "cred-a.json"}},
 		{ID: "cred-a.json::proj-a2", Attributes: map[string]string{"gemini_virtual_parent": "cred-a.json"}},
 		{ID: "cred-a.json::proj-a3", Attributes: map[string]string{"gemini_virtual_parent": "cred-a.json"}},
@@ -481,7 +481,7 @@ func TestRoundRobinSelectorPick_SingleParentFallsBackToFlat(t *testing.T) {
 	}
 
 	for i, expectedID := range want {
-		got, err := selector.Pick(context.Background(), "gemini-cli", "gemini-2.5-pro", cliproxyexecutor.Options{}, auths)
+		got, err := selector.Pick(context.Background(), "gemini-cli", "gemini-2.5-pro", cliproxyexecutor.Options{}, credentials)
 		if err != nil {
 			t.Fatalf("Pick() #%d error = %v", i, err)
 		}
@@ -499,9 +499,9 @@ func TestRoundRobinSelectorPick_MixedVirtualAndNonVirtualFallsBackToFlat(t *test
 
 	selector := &RoundRobinSelector{}
 
-	// Mix of virtual and non-virtual auths (e.g., a regular gemini-cli auth without projects
+	// Mix of virtual and non-virtual credentials (e.g., a regular gemini-cli auth without projects
 	// alongside virtual ones). Should fall back to flat round-robin.
-	auths := []*Auth{
+	credentials := []*Auth{
 		{ID: "cred-a.json::proj-a1", Attributes: map[string]string{"gemini_virtual_parent": "cred-a.json"}},
 		{ID: "cred-regular.json"}, // no gemini_virtual_parent
 	}
@@ -515,7 +515,7 @@ func TestRoundRobinSelectorPick_MixedVirtualAndNonVirtualFallsBackToFlat(t *test
 	}
 
 	for i, expectedID := range want {
-		got, err := selector.Pick(context.Background(), "gemini-cli", "", cliproxyexecutor.Options{}, auths)
+		got, err := selector.Pick(context.Background(), "gemini-cli", "", cliproxyexecutor.Options{}, credentials)
 		if err != nil {
 			t.Fatalf("Pick() #%d error = %v", i, err)
 		}

@@ -23,6 +23,8 @@ const (
 	DefaultPprofAddr             = "127.0.0.1:8316"
 )
 
+const retiredCredentialsDirMessage = "config key credentials-dir is no longer supported; migrate legacy JSON credentials with CLIProxyAPI-migrate credentials and remove credentials-dir"
+
 // Config represents the application's configuration, loaded from a YAML file.
 type Config struct {
 	SDKConfig `yaml:",inline"`
@@ -38,8 +40,9 @@ type Config struct {
 	// RemoteManagement nests management-related options under 'remote-management'.
 	RemoteManagement RemoteManagement `yaml:"remote-management" json:"-"`
 
-	// AuthDir is the directory where authentication token files are stored.
-	AuthDir string `yaml:"auth-dir" json:"-"`
+	// CredentialsDir is kept only for legacy config detection.
+	// Runtime credential storage is now handled by the platform database.
+	CredentialsDir string `yaml:"credentials-dir" json:"-"`
 
 	// Debug enables or disables debug-level logging and other debug features.
 	Debug bool `yaml:"debug" json:"debug"`
@@ -534,6 +537,18 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	// In cloud deploy mode (optional=true), if file is empty or contains only whitespace, return empty config.
 	if optional && len(data) == 0 {
 		return &Config{}, nil
+	}
+
+	var rawRoot map[string]any
+	if err = yaml.Unmarshal(data, &rawRoot); err == nil {
+		if _, exists := rawRoot["auth-dir"]; exists {
+			return nil, fmt.Errorf("legacy config key auth-dir is no longer supported; %s", retiredCredentialsDirMessage)
+		}
+		if raw, exists := rawRoot["credentials-dir"]; exists {
+			if text, ok := raw.(string); !ok || strings.TrimSpace(text) != "" {
+				return nil, fmt.Errorf(retiredCredentialsDirMessage)
+			}
+		}
 	}
 
 	// Unmarshal the YAML data into the Config struct.

@@ -5,6 +5,7 @@ package usage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -90,11 +91,40 @@ type modelStats struct {
 
 // RequestDetail stores the timestamp and token usage for a single request.
 type RequestDetail struct {
-	Timestamp time.Time  `json:"timestamp"`
-	Source    string     `json:"source"`
-	AuthIndex string     `json:"auth_index"`
-	Tokens    TokenStats `json:"tokens"`
-	Failed    bool       `json:"failed"`
+	Timestamp    time.Time  `json:"timestamp"`
+	Source       string     `json:"source"`
+	SelectionKey string     `json:"selection_key"`
+	Tokens       TokenStats `json:"tokens"`
+	Failed       bool       `json:"failed"`
+}
+
+// UnmarshalJSON keeps import compatibility with legacy auth_index snapshots while
+// standardising the in-memory field to selection_key.
+func (d *RequestDetail) UnmarshalJSON(data []byte) error {
+	type rawRequestDetail struct {
+		Timestamp    time.Time  `json:"timestamp"`
+		Source       string     `json:"source"`
+		SelectionKey string     `json:"selection_key"`
+		LegacyIndex  string     `json:"auth_index"`
+		Tokens       TokenStats `json:"tokens"`
+		Failed       bool       `json:"failed"`
+	}
+	var raw rawRequestDetail
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	selectionKey := strings.TrimSpace(raw.SelectionKey)
+	if selectionKey == "" {
+		selectionKey = strings.TrimSpace(raw.LegacyIndex)
+	}
+	*d = RequestDetail{
+		Timestamp:    raw.Timestamp,
+		Source:       raw.Source,
+		SelectionKey: selectionKey,
+		Tokens:       raw.Tokens,
+		Failed:       raw.Failed,
+	}
+	return nil
 }
 
 // TokenStats captures the token usage breakdown for a request.
@@ -198,11 +228,11 @@ func (s *RequestStatistics) Record(ctx context.Context, record coreusage.Record)
 		s.apis[statsKey] = stats
 	}
 	s.updateAPIStats(stats, modelName, RequestDetail{
-		Timestamp: timestamp,
-		Source:    record.Source,
-		AuthIndex: record.AuthIndex,
-		Tokens:    detail,
-		Failed:    failed,
+		Timestamp:    timestamp,
+		Source:       record.Source,
+		SelectionKey: record.SelectionKey,
+		Tokens:       detail,
+		Failed:       failed,
 	})
 
 	s.requestsByDay[dayKey]++
@@ -405,7 +435,7 @@ func dedupKey(apiName, modelName string, detail RequestDetail) string {
 		modelName,
 		timestamp,
 		detail.Source,
-		detail.AuthIndex,
+		detail.SelectionKey,
 		detail.Failed,
 		tokens.InputTokens,
 		tokens.OutputTokens,

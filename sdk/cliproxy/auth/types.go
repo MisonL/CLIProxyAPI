@@ -52,7 +52,7 @@ type Auth struct {
 	Provider string `json:"provider"`
 	// Prefix optionally namespaces models for routing (e.g., "teamA/gemini-3-pro-preview").
 	Prefix string `json:"prefix,omitempty"`
-	// FileName stores the relative or absolute path of the backing auth file.
+	// FileName stores the relative or absolute path of the backing credential file.
 	FileName string `json:"-"`
 	// Storage holds the token persistence implementation used during login flows.
 	Storage baseauth.TokenStorage `json:"-"`
@@ -153,7 +153,7 @@ func (a *Auth) Clone() *Auth {
 	return &copyAuth
 }
 
-func stableAuthIndex(seed string) string {
+func stableSelectionKey(seed string) string {
 	seed = strings.TrimSpace(seed)
 	if seed == "" {
 		return ""
@@ -162,8 +162,8 @@ func stableAuthIndex(seed string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// EnsureIndex returns a stable index derived from the auth file name or API key.
-func (a *Auth) EnsureIndex() string {
+// EnsureSelectionKey returns the stable selection_key derived from credential identity.
+func (a *Auth) EnsureSelectionKey() string {
 	if a == nil {
 		return ""
 	}
@@ -187,10 +187,10 @@ func (a *Auth) EnsureIndex() string {
 		}
 	}
 
-	idx := stableAuthIndex(seed)
-	a.Index = idx
+	key := stableSelectionKey(seed)
+	a.Index = key
 	a.indexAssigned = true
-	return idx
+	return key
 }
 
 // Clone duplicates a model state including nested error details.
@@ -396,7 +396,7 @@ func (a *Auth) AccountInfo() (string, string) {
 
 // ExpirationTime attempts to extract the credential expiration timestamp from metadata.
 // It inspects common keys such as "expired", "expire", "expires_at", and also
-// nested "token" objects to remain compatible with legacy auth file formats.
+// nested "token" objects to remain compatible with legacy credential file formats.
 func (a *Auth) ExpirationTime() (time.Time, bool) {
 	if a == nil {
 		return time.Time{}, false

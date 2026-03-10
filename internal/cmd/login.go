@@ -40,7 +40,7 @@ func (e *projectSelectionRequiredError) Error() string {
 
 // DoLogin handles Google Gemini authentication using the shared authentication manager.
 // It initiates the OAuth flow for Google Gemini services, performs the legacy CLI user setup,
-// and saves the authentication tokens to the configured auth directory.
+// and saves the authentication tokens to the configured credentials directory.
 //
 // Parameters:
 //   - cfg: The application configuration
@@ -188,19 +188,25 @@ func DoLogin(cfg *config.Config, projectID string, options *LoginOptions) {
 
 	updateAuthRecord(record, storage)
 
-	store := sdkAuth.GetTokenStore()
-	if setter, okSetter := store.(interface{ SetBaseDir(string) }); okSetter && cfg != nil {
-		setter.SetBaseDir(cfg.AuthDir)
+	handle, errStore := newCommandAuthStore(cfg)
+	if errStore != nil {
+		log.Errorf("Failed to initialize auth store: %v", errStore)
+		return
 	}
+	defer func() {
+		if handle.close != nil {
+			_ = handle.close()
+		}
+	}()
 
-	savedPath, errSave := store.Save(ctx, record)
+	savedPath, errSave := handle.store.Save(ctx, record)
 	if errSave != nil {
-		log.Errorf("Failed to save token to file: %v", errSave)
+		log.Errorf("Failed to save credential: %v", errSave)
 		return
 	}
 
 	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
+		fmt.Printf("Credential saved as %s\n", savedPath)
 	}
 
 	fmt.Println("Gemini authentication successful!")

@@ -21,12 +21,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/access"
 	managementHandlers "github.com/router-for-me/CLIProxyAPI/v6/internal/api/handlers/management"
+	platformv2Handlers "github.com/router-for-me/CLIProxyAPI/v6/internal/api/handlers/platformv2"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api/middleware"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api/modules"
 	ampmodule "github.com/router-for-me/CLIProxyAPI/v6/internal/api/modules/amp"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/managementasset"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/platform"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
@@ -52,6 +54,7 @@ type serverOptionConfig struct {
 	keepAliveTimeout     time.Duration
 	keepAliveOnTimeout   func()
 	postAuthHook         auth.PostAuthHook
+	platformRuntime      *platform.Runtime
 }
 
 // ServerOption customises HTTP server construction.
@@ -59,7 +62,7 @@ type ServerOption func(*serverOptionConfig)
 
 func defaultRequestLoggerFactory(cfg *config.Config, configPath string) logging.RequestLogger {
 	configDir := filepath.Dir(configPath)
-	logsDir := logging.ResolveLogDirectory(cfg)
+	logsDir := logging.ResolveLogDirectory(cfg, configPath)
 	return logging.NewFileRequestLogger(cfg.RequestLog, logsDir, configDir, cfg.ErrorLogsMaxFiles)
 }
 
@@ -117,6 +120,12 @@ func WithPostAuthHook(hook auth.PostAuthHook) ServerOption {
 	}
 }
 
+func WithPlatformRuntime(runtime *platform.Runtime) ServerOption {
+	return func(cfg *serverOptionConfig) {
+		cfg.platformRuntime = runtime
+	}
+}
+
 // Server represents the main API server.
 // It encapsulates the Gin engine, HTTP server, handlers, and configuration.
 type Server struct {
@@ -170,6 +179,7 @@ type Server struct {
 	envManagementSecret bool
 
 	localPassword string
+	platformMode  bool
 
 	keepAliveEnabled   bool
 	keepAliveTimeout   time.Duration
@@ -266,12 +276,17 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	if optionState.localPassword != "" {
 		s.mgmt.SetLocalPassword(optionState.localPassword)
 	}
-	logDir := logging.ResolveLogDirectory(cfg)
+	logDir := logging.ResolveLogDirectory(cfg, configFilePath)
 	s.mgmt.SetLogDirectory(logDir)
 	if optionState.postAuthHook != nil {
 		s.mgmt.SetPostAuthHook(optionState.postAuthHook)
 	}
+	if optionState.platformRuntime != nil {
+		s.mgmt.SetTokenStore(optionState.platformRuntime)
+		s.mgmt.SetPlatformRuntime(optionState.platformRuntime)
+	}
 	s.localPassword = optionState.localPassword
+	s.platformMode = optionState.platformRuntime != nil
 
 	// Setup routes
 	s.setupRoutes()
@@ -299,6 +314,49 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	s.managementRoutesEnabled.Store(hasManagementSecret)
 	if hasManagementSecret {
 		s.registerManagementRoutes()
+	}
+	if optionState.platformRuntime != nil {
+		platformHandler := platformv2Handlers.New(optionState.platformRuntime, authManager, cfg)
+		// Platform APIs are management-only. We expose them at `/v2/*` and also under
+		// `/v0/management/v2/*` for the management panel (which uses the `/v0/management`
+		// base URL for all requests).
+		v2 := engine.Group("/v2")
+		v2.Use(s.managementAvailabilityMiddleware(), s.mgmt.Middleware())
+		v2.GET("/system/platform", platformHandler.Status)
+		v2.GET("/system/quota-refresh-policies", platformHandler.GetQuotaRefreshPolicies)
+		v2.PUT("/system/quota-refresh-policies", platformHandler.PutQuotaRefreshPolicies)
+		v2.GET("/providers/:provider/overview", platformHandler.ProviderOverview)
+		v2.GET("/providers/:provider/histogram-bucket-items", platformHandler.GetHistogramBucketItems)
+		v2.GET("/providers/:provider/credentials", platformHandler.ListProviderCredentials)
+		v2.POST("/providers/:provider/refresh", platformHandler.RefreshProvider)
+		v2.GET("/credentials", platformHandler.ListCredentials)
+		v2.POST("/credentials/import", platformHandler.ImportCredential)
+		v2.GET("/credentials/:credentialID", platformHandler.GetCredential)
+		v2.GET("/traces/:requestID", platformHandler.GetTrace)
+		v2.GET("/credentials/:credentialID/download", platformHandler.DownloadCredential)
+		v2.GET("/credentials/:credentialID/models", platformHandler.GetCredentialModels)
+		v2.PUT("/credentials/:credentialID/content", platformHandler.UpdateCredentialContent)
+		v2.PATCH("/credentials/:credentialID/status", platformHandler.PatchCredentialStatus)
+		v2.DELETE("/credentials/:credentialID", platformHandler.DeleteCredential)
+
+		mgmtV2 := engine.Group("/v0/management/v2")
+		mgmtV2.Use(s.managementAvailabilityMiddleware(), s.mgmt.Middleware())
+		mgmtV2.GET("/system/platform", platformHandler.Status)
+		mgmtV2.GET("/system/quota-refresh-policies", platformHandler.GetQuotaRefreshPolicies)
+		mgmtV2.PUT("/system/quota-refresh-policies", platformHandler.PutQuotaRefreshPolicies)
+		mgmtV2.GET("/providers/:provider/overview", platformHandler.ProviderOverview)
+		mgmtV2.GET("/providers/:provider/histogram-bucket-items", platformHandler.GetHistogramBucketItems)
+		mgmtV2.GET("/providers/:provider/credentials", platformHandler.ListProviderCredentials)
+		mgmtV2.POST("/providers/:provider/refresh", platformHandler.RefreshProvider)
+		mgmtV2.GET("/credentials", platformHandler.ListCredentials)
+		mgmtV2.POST("/credentials/import", platformHandler.ImportCredential)
+		mgmtV2.GET("/credentials/:credentialID", platformHandler.GetCredential)
+		mgmtV2.GET("/traces/:requestID", platformHandler.GetTrace)
+		mgmtV2.GET("/credentials/:credentialID/download", platformHandler.DownloadCredential)
+		mgmtV2.GET("/credentials/:credentialID/models", platformHandler.GetCredentialModels)
+		mgmtV2.PUT("/credentials/:credentialID/content", platformHandler.UpdateCredentialContent)
+		mgmtV2.PATCH("/credentials/:credentialID/status", platformHandler.PatchCredentialStatus)
+		mgmtV2.DELETE("/credentials/:credentialID", platformHandler.DeleteCredential)
 	}
 
 	if optionState.keepAliveEnabled {
@@ -371,7 +429,7 @@ func (s *Server) setupRoutes() {
 			errStr = c.Query("error_description")
 		}
 		if state != "" {
-			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession(s.cfg.AuthDir, "anthropic", state, code, errStr)
+			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession("anthropic", state, code, errStr)
 		}
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, oauthCallbackSuccessHTML)
@@ -385,7 +443,7 @@ func (s *Server) setupRoutes() {
 			errStr = c.Query("error_description")
 		}
 		if state != "" {
-			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession(s.cfg.AuthDir, "codex", state, code, errStr)
+			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession("codex", state, code, errStr)
 		}
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, oauthCallbackSuccessHTML)
@@ -399,7 +457,7 @@ func (s *Server) setupRoutes() {
 			errStr = c.Query("error_description")
 		}
 		if state != "" {
-			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession(s.cfg.AuthDir, "gemini", state, code, errStr)
+			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession("gemini", state, code, errStr)
 		}
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, oauthCallbackSuccessHTML)
@@ -413,7 +471,7 @@ func (s *Server) setupRoutes() {
 			errStr = c.Query("error_description")
 		}
 		if state != "" {
-			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession(s.cfg.AuthDir, "iflow", state, code, errStr)
+			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession("iflow", state, code, errStr)
 		}
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, oauthCallbackSuccessHTML)
@@ -427,7 +485,7 @@ func (s *Server) setupRoutes() {
 			errStr = c.Query("error_description")
 		}
 		if state != "" {
-			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession(s.cfg.AuthDir, "antigravity", state, code, errStr)
+			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession("antigravity", state, code, errStr)
 		}
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, oauthCallbackSuccessHTML)
@@ -522,6 +580,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.DELETE("/proxy-url", s.mgmt.DeleteProxyURL)
 
 		mgmt.POST("/api-call", s.mgmt.APICall)
+		mgmt.POST("/api-call/batch", s.mgmt.APICallBatch)
 
 		mgmt.GET("/quota-exceeded/switch-project", s.mgmt.GetSwitchProject)
 		mgmt.PUT("/quota-exceeded/switch-project", s.mgmt.PutSwitchProject)
@@ -622,14 +681,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PATCH("/oauth-model-alias", s.mgmt.PatchOAuthModelAlias)
 		mgmt.DELETE("/oauth-model-alias", s.mgmt.DeleteOAuthModelAlias)
 
-		mgmt.GET("/auth-files", s.mgmt.ListAuthFiles)
-		mgmt.GET("/auth-files/models", s.mgmt.GetAuthFileModels)
 		mgmt.GET("/model-definitions/:channel", s.mgmt.GetStaticModelDefinitions)
-		mgmt.GET("/auth-files/download", s.mgmt.DownloadAuthFile)
-		mgmt.POST("/auth-files", s.mgmt.UploadAuthFile)
-		mgmt.DELETE("/auth-files", s.mgmt.DeleteAuthFile)
-		mgmt.PATCH("/auth-files/status", s.mgmt.PatchAuthFileStatus)
-		mgmt.PATCH("/auth-files/fields", s.mgmt.PatchAuthFileFields)
 		mgmt.POST("/vertex/import", s.mgmt.ImportVertexCredential)
 
 		mgmt.GET("/anthropic-auth-url", s.mgmt.RequestAnthropicToken)
@@ -989,10 +1041,7 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 
 	// Count client sources from configuration and auth store.
 	tokenStore := sdkAuth.GetTokenStore()
-	if dirSetter, ok := tokenStore.(interface{ SetBaseDir(string) }); ok {
-		dirSetter.SetBaseDir(cfg.AuthDir)
-	}
-	authEntries := util.CountAuthFiles(context.Background(), tokenStore)
+	authEntries := util.CountCredentials(context.Background(), tokenStore)
 	geminiAPIKeyCount := len(cfg.GeminiKey)
 	claudeAPIKeyCount := len(cfg.ClaudeKey)
 	codexAPIKeyCount := len(cfg.CodexKey)

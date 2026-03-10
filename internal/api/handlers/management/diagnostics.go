@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"context"
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/managementasset"
+
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 )
 
 type selfCheckStatus string
@@ -97,7 +98,7 @@ func (h *Handler) GetUsagePersistenceStatus(c *gin.Context) {
 func (h *Handler) buildSelfCheckItems() []selfCheckItem {
 	items := []selfCheckItem{
 		h.checkConfigFile(),
-		h.checkAuthDir(),
+		h.checkPlatformRuntime(),
 		h.checkLogDir(),
 		h.checkManagementAsset(),
 		h.checkUsagePersistence(),
@@ -146,22 +147,36 @@ func (h *Handler) checkConfigFile() selfCheckItem {
 	}
 }
 
-func (h *Handler) checkAuthDir() selfCheckItem {
-	authDir := ""
-	if h != nil && h.cfg != nil {
-		authDir = h.cfg.AuthDir
-	}
-	authDir, err := util.ResolveAuthDir(authDir)
-	if err != nil || authDir == "" {
+func (h *Handler) checkPlatformRuntime() selfCheckItem {
+	if h == nil || h.platformRuntime == nil {
 		return selfCheckItem{
-			ID:         "auth-dir",
-			Status:     selfCheckStatusWarn,
-			Title:      "认证目录",
-			Message:    "认证目录未配置或无法解析",
-			Suggestion: "检查 auth-dir 配置",
+			ID:         "platform-runtime",
+			Status:     selfCheckStatusError,
+			Title:      "平台运行时",
+			Message:    "平台运行时未启用",
+			Suggestion: "检查 CPA_PLATFORM_* 环境变量和平台依赖服务",
 		}
 	}
-	return buildDirectoryCheckItem("auth-dir", "认证目录", authDir, true)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := h.platformRuntime.HealthCheck(ctx); err != nil {
+		return selfCheckItem{
+			ID:         "platform-runtime",
+			Status:     selfCheckStatusError,
+			Title:      "平台运行时",
+			Message:    "平台运行时健康检查失败",
+			Details:    err.Error(),
+			Suggestion: "检查 PostgreSQL、Redis、NATS 连接状态",
+		}
+	}
+	status := h.platformRuntime.Status()
+	return selfCheckItem{
+		ID:      "platform-runtime",
+		Status:  selfCheckStatusOK,
+		Title:   "平台运行时",
+		Message: "平台运行时健康",
+		Details: strings.TrimSpace(status.Role) + " | " + strings.TrimSpace(status.DatabaseSchema) + " | " + strings.TrimSpace(status.TenantSlug) + "/" + strings.TrimSpace(status.WorkspaceSlug),
+	}
 }
 
 func (h *Handler) checkLogDir() selfCheckItem {

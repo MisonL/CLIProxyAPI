@@ -21,6 +21,8 @@ import (
 )
 
 const defaultAPICallTimeout = 60 * time.Second
+const maxAPICallBatchConcurrency = 12
+const maxAPICallBatchItems = 200
 
 const (
 	geminiOAuthClientID     = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
@@ -41,19 +43,42 @@ const (
 var antigravityOAuthTokenURL = "https://oauth2.googleapis.com/token"
 
 type apiCallRequest struct {
-	AuthIndexSnake  *string           `json:"auth_index"`
-	AuthIndexCamel  *string           `json:"authIndex"`
-	AuthIndexPascal *string           `json:"AuthIndex"`
-	Method          string            `json:"method"`
-	URL             string            `json:"url"`
-	Header          map[string]string `json:"header"`
-	Data            string            `json:"data"`
+	SelectionKeySnake     *string           `json:"selection_key"`
+	SelectionKeyCamel     *string           `json:"selectionKey"`
+	SelectionKeyPascal    *string           `json:"SelectionKey"`
+	LegacyAuthIndexSnake  *string           `json:"auth_index"`
+	LegacyAuthIndexCamel  *string           `json:"authIndex"`
+	LegacyAuthIndexPascal *string           `json:"AuthIndex"`
+	Method                string            `json:"method"`
+	URL                   string            `json:"url"`
+	Header                map[string]string `json:"header"`
+	Data                  string            `json:"data"`
 }
 
 type apiCallResponse struct {
 	StatusCode int                 `json:"status_code"`
 	Header     map[string][]string `json:"header"`
-	Body       string              `json:"body"`
+	Body       any                 `json:"body"`
+}
+
+type apiCallBatchRequestItem struct {
+	Key string `json:"key"`
+	apiCallRequest
+}
+
+type apiCallBatchRequest struct {
+	Items []apiCallBatchRequestItem `json:"items"`
+}
+
+type apiCallBatchResponseItem struct {
+	Key string `json:"key"`
+	apiCallResponse
+}
+
+type apiCallExecutionResult struct {
+	Response    apiCallResponse
+	ErrorStatus int
+	ErrorText   string
 }
 
 // APICall makes a generic HTTP request on behalf of the management API caller.
@@ -71,8 +96,10 @@ type apiCallResponse struct {
 //	- X-Management-Key: <key>
 //
 // Request JSON:
-//   - auth_index / authIndex / AuthIndex (optional):
-//     The credential "auth_index" from GET /v0/management/auth-files (or other endpoints returning it).
+//   - selection_key / selectionKey / SelectionKey (optional):
+//     The credential `selection_key` from GET /v2/credentials.
+//     Legacy auth_index aliases remain accepted for backward compatibility.
+//     or other endpoints returning it.
 //     If omitted or not found, credential-specific proxy/token substitution is skipped.
 //   - method (required): HTTP method, e.g. GET, POST, PUT, PATCH, DELETE.
 //   - url (required): Absolute URL including scheme and host, e.g. "https://api.example.com/v1/ping".
@@ -100,12 +127,12 @@ type apiCallResponse struct {
 //	curl -sS -X POST "http://127.0.0.1:8317/v0/management/api-call" \
 //	  -H "Authorization: Bearer <MANAGEMENT_KEY>" \
 //	  -H "Content-Type: application/json" \
-//	  -d '{"auth_index":"<AUTH_INDEX>","method":"GET","url":"https://api.example.com/v1/ping","header":{"Authorization":"Bearer $TOKEN$"}}'
+//	  -d '{"selection_key":"<SELECTION_KEY>","method":"GET","url":"https://api.example.com/v1/ping","header":{"Authorization":"Bearer $TOKEN$"}}'
 //
 //	curl -sS -X POST "http://127.0.0.1:8317/v0/management/api-call" \
 //	  -H "Authorization: Bearer 831227" \
 //	  -H "Content-Type: application/json" \
-//	  -d '{"auth_index":"<AUTH_INDEX>","method":"POST","url":"https://api.example.com/v1/fetchAvailableModels","header":{"Authorization":"Bearer $TOKEN$","Content-Type":"application/json","User-Agent":"cliproxyapi"},"data":"{}"}'
+//	  -d '{"selection_key":"<SELECTION_KEY>","method":"POST","url":"https://api.example.com/v1/fetchAvailableModels","header":{"Authorization":"Bearer $TOKEN$","Content-Type":"application/json","User-Agent":"cliproxyapi"},"data":"{}"}'
 func (h *Handler) APICall(c *gin.Context) {
 	var body apiCallRequest
 	if errBindJSON := c.ShouldBindJSON(&body); errBindJSON != nil {
@@ -113,25 +140,98 @@ func (h *Handler) APICall(c *gin.Context) {
 		return
 	}
 
+	result := h.executeAPICall(c.Request.Context(), body)
+	if result.ErrorStatus != 0 {
+		c.JSON(result.ErrorStatus, gin.H{"error": result.ErrorText})
+		return
+	}
+
+	c.JSON(http.StatusOK, result.Response)
+}
+
+// APICallBatch makes multiple generic HTTP requests on behalf of the management API caller.
+//
+// Endpoint:
+//
+//	POST /v0/management/api-call/batch
+func (h *Handler) APICallBatch(c *gin.Context) {
+	var body apiCallBatchRequest
+	if errBindJSON := c.ShouldBindJSON(&body); errBindJSON != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	if len(body.Items) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing items"})
+		return
+	}
+	if len(body.Items) > maxAPICallBatchItems {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("too many items (max %d)", maxAPICallBatchItems)})
+		return
+	}
+
+	results := make([]apiCallBatchResponseItem, len(body.Items))
+	workerCount := len(body.Items)
+	if workerCount > maxAPICallBatchConcurrency {
+		workerCount = maxAPICallBatchConcurrency
+	}
+
+	indices := make(chan int)
+	done := make(chan struct{})
+
+	for i := 0; i < workerCount; i++ {
+		go func() {
+			for idx := range indices {
+				item := body.Items[idx]
+				result := h.executeAPICall(c.Request.Context(), item.apiCallRequest)
+				if result.ErrorStatus != 0 {
+					results[idx] = apiCallBatchResponseItem{
+						Key: item.Key,
+						apiCallResponse: apiCallResponse{
+							StatusCode: result.ErrorStatus,
+							Header:     map[string][]string{},
+							Body:       gin.H{"error": result.ErrorText},
+						},
+					}
+					continue
+				}
+				results[idx] = apiCallBatchResponseItem{
+					Key:             item.Key,
+					apiCallResponse: result.Response,
+				}
+			}
+			done <- struct{}{}
+		}()
+	}
+
+	for idx := range body.Items {
+		indices <- idx
+	}
+	close(indices)
+
+	for i := 0; i < workerCount; i++ {
+		<-done
+	}
+
+	c.JSON(http.StatusOK, gin.H{"items": results})
+}
+
+func (h *Handler) executeAPICall(ctx context.Context, body apiCallRequest) apiCallExecutionResult {
 	method := strings.ToUpper(strings.TrimSpace(body.Method))
 	if method == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing method"})
-		return
+		return apiCallExecutionResult{ErrorStatus: http.StatusBadRequest, ErrorText: "missing method"}
 	}
 
 	urlStr := strings.TrimSpace(body.URL)
 	if urlStr == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing url"})
-		return
+		return apiCallExecutionResult{ErrorStatus: http.StatusBadRequest, ErrorText: "missing url"}
 	}
 	parsedURL, errParseURL := url.Parse(urlStr)
 	if errParseURL != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid url"})
-		return
+		return apiCallExecutionResult{ErrorStatus: http.StatusBadRequest, ErrorText: "invalid url"}
 	}
 
-	authIndex := firstNonEmptyString(body.AuthIndexSnake, body.AuthIndexCamel, body.AuthIndexPascal)
-	auth := h.authByIndex(authIndex)
+	selectionKey := firstNonEmptyString(body.SelectionKeySnake, body.SelectionKeyCamel, body.SelectionKeyPascal, body.LegacyAuthIndexSnake, body.LegacyAuthIndexCamel, body.LegacyAuthIndexPascal)
+	auth := h.authBySelectionKey(selectionKey)
 
 	reqHeaders := body.Header
 	if reqHeaders == nil {
@@ -147,16 +247,14 @@ func (h *Handler) APICall(c *gin.Context) {
 			continue
 		}
 		if !tokenResolved {
-			token, tokenErr = h.resolveTokenForAuth(c.Request.Context(), auth)
+			token, tokenErr = h.resolveTokenForAuth(ctx, auth)
 			tokenResolved = true
 		}
 		if auth != nil && token == "" {
 			if tokenErr != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "auth token refresh failed"})
-				return
+				return apiCallExecutionResult{ErrorStatus: http.StatusBadRequest, ErrorText: "auth token refresh failed"}
 			}
-			c.JSON(http.StatusBadRequest, gin.H{"error": "auth token not found"})
-			return
+			return apiCallExecutionResult{ErrorStatus: http.StatusBadRequest, ErrorText: "auth token not found"}
 		}
 		if token == "" {
 			continue
@@ -169,10 +267,9 @@ func (h *Handler) APICall(c *gin.Context) {
 		requestBody = strings.NewReader(body.Data)
 	}
 
-	req, errNewRequest := http.NewRequestWithContext(c.Request.Context(), method, urlStr, requestBody)
+	req, errNewRequest := http.NewRequestWithContext(ctx, method, urlStr, requestBody)
 	if errNewRequest != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to build request"})
-		return
+		return apiCallExecutionResult{ErrorStatus: http.StatusBadRequest, ErrorText: "failed to build request"}
 	}
 
 	for key, value := range reqHeaders {
@@ -194,8 +291,7 @@ func (h *Handler) APICall(c *gin.Context) {
 	resp, errDo := httpClient.Do(req)
 	if errDo != nil {
 		log.WithError(errDo).Debug("management APICall request failed")
-		c.JSON(http.StatusBadGateway, gin.H{"error": "request failed"})
-		return
+		return apiCallExecutionResult{ErrorStatus: http.StatusBadGateway, ErrorText: "request failed"}
 	}
 	defer func() {
 		if errClose := resp.Body.Close(); errClose != nil {
@@ -205,15 +301,16 @@ func (h *Handler) APICall(c *gin.Context) {
 
 	respBody, errReadAll := io.ReadAll(resp.Body)
 	if errReadAll != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read response"})
-		return
+		return apiCallExecutionResult{ErrorStatus: http.StatusBadGateway, ErrorText: "failed to read response"}
 	}
 
-	c.JSON(http.StatusOK, apiCallResponse{
-		StatusCode: resp.StatusCode,
-		Header:     resp.Header,
-		Body:       string(respBody),
-	})
+	return apiCallExecutionResult{
+		Response: apiCallResponse{
+			StatusCode: resp.StatusCode,
+			Header:     resp.Header,
+			Body:       string(respBody),
+		},
+	}
 }
 
 func firstNonEmptyString(values ...*string) string {
@@ -613,18 +710,17 @@ func tokenValueFromMetadata(metadata map[string]any) string {
 	return ""
 }
 
-func (h *Handler) authByIndex(authIndex string) *coreauth.Auth {
-	authIndex = strings.TrimSpace(authIndex)
-	if authIndex == "" || h == nil || h.authManager == nil {
+func (h *Handler) authBySelectionKey(selectionKey string) *coreauth.Auth {
+	selectionKey = strings.TrimSpace(selectionKey)
+	if selectionKey == "" || h == nil || h.authManager == nil {
 		return nil
 	}
-	auths := h.authManager.List()
-	for _, auth := range auths {
+	credentials := h.authManager.List()
+	for _, auth := range credentials {
 		if auth == nil {
 			continue
 		}
-		auth.EnsureIndex()
-		if auth.Index == authIndex {
+		if auth.EnsureSelectionKey() == selectionKey {
 			return auth
 		}
 	}

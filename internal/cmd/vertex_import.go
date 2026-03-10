@@ -12,7 +12,6 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/auth/vertex"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
-	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 )
@@ -24,8 +23,8 @@ func DoVertexImport(cfg *config.Config, keyPath string) {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
-	if resolved, errResolve := util.ResolveAuthDir(cfg.AuthDir); errResolve == nil {
-		cfg.AuthDir = resolved
+	if resolved, errResolve := util.ResolveCredentialsDir(cfg.CredentialsDir); errResolve == nil {
+		cfg.CredentialsDir = resolved
 	}
 	rawPath := strings.TrimSpace(keyPath)
 	if rawPath == "" {
@@ -86,16 +85,22 @@ func DoVertexImport(cfg *config.Config, keyPath string) {
 		Metadata: metadata,
 	}
 
-	store := sdkAuth.GetTokenStore()
-	if setter, ok := store.(interface{ SetBaseDir(string) }); ok {
-		setter.SetBaseDir(cfg.AuthDir)
+	handle, errStore := newCommandAuthStore(cfg)
+	if errStore != nil {
+		log.Errorf("vertex-import: init auth store failed: %v", errStore)
+		return
 	}
-	path, errSave := store.Save(context.Background(), record)
+	defer func() {
+		if handle.close != nil {
+			_ = handle.close()
+		}
+	}()
+	path, errSave := handle.store.Save(context.Background(), record)
 	if errSave != nil {
 		log.Errorf("vertex-import: save credential failed: %v", errSave)
 		return
 	}
-	fmt.Printf("Vertex credentials imported: %s\n", path)
+	fmt.Printf("Vertex credential imported as %s\n", path)
 }
 
 func sanitizeFilePart(s string) string {

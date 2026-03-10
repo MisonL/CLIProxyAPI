@@ -14,6 +14,17 @@ services:
     #   - .env
     environment:
       DEPLOY: ${DEPLOY:-}
+      CPA_PLATFORM_ROLE: ${CPA_PLATFORM_ROLE:-server}
+      CPA_PLATFORM_DATABASE_URL: ${CPA_PLATFORM_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/cliproxy?sslmode=disable}
+      CPA_PLATFORM_DATABASE_SCHEMA: ${CPA_PLATFORM_DATABASE_SCHEMA:-controlplane}
+      CPA_PLATFORM_REDIS_URL: ${CPA_PLATFORM_REDIS_URL:-redis://redis:6379/0}
+      CPA_PLATFORM_NATS_URL: ${CPA_PLATFORM_NATS_URL:-nats://nats:4222}
+      CPA_PLATFORM_NATS_STREAM: ${CPA_PLATFORM_NATS_STREAM:-CPA_EVENTS}
+      CPA_PLATFORM_TENANT_SLUG: ${CPA_PLATFORM_TENANT_SLUG:-default}
+      CPA_PLATFORM_TENANT_NAME: ${CPA_PLATFORM_TENANT_NAME:-Default Tenant}
+      CPA_PLATFORM_WORKSPACE_SLUG: ${CPA_PLATFORM_WORKSPACE_SLUG:-default}
+      CPA_PLATFORM_WORKSPACE_NAME: ${CPA_PLATFORM_WORKSPACE_NAME:-Default Workspace}
+      CPA_MASTER_KEY: ${CPA_MASTER_KEY:-change-me}
     ports:
       - "8317:8317"
       - "8085:8085"
@@ -23,6 +34,67 @@ services:
       - "11451:11451"
     volumes:
       - ${CLI_PROXY_CONFIG_PATH:-./config.yaml}:/CLIProxyAPI/config.yaml
-      - ${CLI_PROXY_AUTH_PATH:-./auths}:/root/.cli-proxy-api
       - ${CLI_PROXY_LOG_PATH:-./logs}:/CLIProxyAPI/logs
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+      - nats
+
+  cli-proxy-worker:
+    image: ${CLI_PROXY_IMAGE:-misonl/cliproxyapi:latest}
+    pull_policy: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-none}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    container_name: cli-proxy-worker
+    command: ["./CLIProxyAPI-worker"]
+    environment:
+      CPA_PLATFORM_ROLE: worker
+      CPA_PLATFORM_DATABASE_URL: ${CPA_PLATFORM_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/cliproxy?sslmode=disable}
+      CPA_PLATFORM_DATABASE_SCHEMA: ${CPA_PLATFORM_DATABASE_SCHEMA:-controlplane}
+      CPA_PLATFORM_REDIS_URL: ${CPA_PLATFORM_REDIS_URL:-redis://redis:6379/0}
+      CPA_PLATFORM_NATS_URL: ${CPA_PLATFORM_NATS_URL:-nats://nats:4222}
+      CPA_PLATFORM_NATS_STREAM: ${CPA_PLATFORM_NATS_STREAM:-CPA_EVENTS}
+      CPA_PLATFORM_TENANT_SLUG: ${CPA_PLATFORM_TENANT_SLUG:-default}
+      CPA_PLATFORM_TENANT_NAME: ${CPA_PLATFORM_TENANT_NAME:-Default Tenant}
+      CPA_PLATFORM_WORKSPACE_SLUG: ${CPA_PLATFORM_WORKSPACE_SLUG:-default}
+      CPA_PLATFORM_WORKSPACE_NAME: ${CPA_PLATFORM_WORKSPACE_NAME:-Default Workspace}
+      CPA_MASTER_KEY: ${CPA_MASTER_KEY:-change-me}
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+      - nats
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: cli-proxy-postgres
+    environment:
+      POSTGRES_DB: ${PLATFORM_POSTGRES_DB:-cliproxy}
+      POSTGRES_USER: ${PLATFORM_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${PLATFORM_POSTGRES_PASSWORD:-postgres}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - ${PLATFORM_POSTGRES_DATA_PATH:-./data/postgres}:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: cli-proxy-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ${PLATFORM_REDIS_DATA_PATH:-./data/redis}:/data
+    restart: unless-stopped
+
+  nats:
+    image: nats:2.11-alpine
+    container_name: cli-proxy-nats
+    command: ["-js", "--store_dir=/data"]
+    volumes:
+      - ${PLATFORM_NATS_DATA_PATH:-./data/nats}:/data
     restart: unless-stopped

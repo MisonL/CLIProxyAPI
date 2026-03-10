@@ -12,6 +12,8 @@ logs/*
 conv/*
 temp/*
 refs/*
+dist/*
+credentials/*
 
 # Storage backends
 pgstore/*

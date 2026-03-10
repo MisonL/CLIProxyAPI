@@ -14,14 +14,19 @@ import (
 // and waits for authorization before saving the tokens.
 //
 // Parameters:
-//   - cfg: The application configuration containing proxy and auth directory settings
+//   - cfg: The application configuration containing proxy and credentials directory settings
 //   - options: Login options including browser behavior settings
 func DoKimiLogin(cfg *config.Config, options *LoginOptions) {
 	if options == nil {
 		options = &LoginOptions{}
 	}
 
-	manager := newAuthManager()
+	manager, closeStore, errStore := newAuthManager(cfg)
+	if errStore != nil {
+		log.Errorf("Kimi authentication setup failed: %v", errStore)
+		return
+	}
+	defer closeStore()
 	authOpts := &sdkAuth.LoginOptions{
 		NoBrowser: options.NoBrowser,
 		Metadata:  map[string]string{},
@@ -35,7 +40,7 @@ func DoKimiLogin(cfg *config.Config, options *LoginOptions) {
 	}
 
 	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
+		fmt.Printf("Credential saved as %s\n", savedPath)
 	}
 	if record != nil && record.Label != "" {
 		fmt.Printf("Authenticated as %s\n", record.Label)

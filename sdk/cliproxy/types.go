@@ -67,18 +67,17 @@ type APIKeyClientResult struct {
 	OpenAICompatCount int
 }
 
-// WatcherFactory creates a watcher for configuration and token changes.
+// WatcherFactory creates a watcher for configuration hot reloads and runtime auth updates.
 // The reload callback receives the updated configuration when changes are detected.
 //
 // Parameters:
 //   - configPath: The path to the configuration file to watch
-//   - authDir: The directory containing authentication tokens to watch
 //   - reload: The callback function to call when changes are detected
 //
 // Returns:
 //   - *WatcherWrapper: A watcher wrapper instance
 //   - error: An error if watcher creation fails
-type WatcherFactory func(configPath, authDir string, reload func(*config.Config)) (*WatcherWrapper, error)
+type WatcherFactory func(configPath string, reload func(*config.Config)) (*WatcherWrapper, error)
 
 // WatcherWrapper exposes the subset of watcher methods required by the SDK.
 type WatcherWrapper struct {

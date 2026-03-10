@@ -48,7 +48,7 @@ func (m dashboardModel) Init() tea.Cmd {
 func (m dashboardModel) fetchData() tea.Msg {
 	cfg, cfgErr := m.client.GetConfig()
 	usage, usageErr := m.client.GetUsage()
-	authFiles, authErr := m.client.GetAuthFiles()
+	authFiles, authErr := m.client.GetCredentials()
 	apiKeys, keysErr := m.client.GetAPIKeys()
 
 	var err error
@@ -159,7 +159,7 @@ func (m dashboardModel) renderDashboard(cfg, usage map[string]any, authFiles []m
 		lipgloss.NewStyle().Foreground(colorMuted).Render(T("mgmt_keys")),
 	))
 
-	// Card 2: Auth Files
+	// Card 2: Credentials
 	authCount := len(authFiles)
 	activeAuth := 0
 	for _, f := range authFiles {

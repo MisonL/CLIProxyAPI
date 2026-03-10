@@ -203,9 +203,6 @@ func (b *Builder) Build() (*Service, error) {
 	coreManager := b.coreManager
 	if coreManager == nil {
 		tokenStore := sdkAuth.GetTokenStore()
-		if dirSetter, ok := tokenStore.(interface{ SetBaseDir(string) }); ok && b.cfg != nil {
-			dirSetter.SetBaseDir(b.cfg.AuthDir)
-		}
 
 		strategy := ""
 		if b.cfg != nil {

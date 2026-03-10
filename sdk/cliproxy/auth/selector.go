@@ -191,10 +191,10 @@ func preferCodexWebsocketAuths(ctx context.Context, provider string, available [
 	return available
 }
 
-func collectAvailableByPriority(auths []*Auth, model string, now time.Time) (available map[int][]*Auth, cooldownCount int, earliest time.Time) {
+func collectAvailableByPriority(credentials []*Auth, model string, now time.Time) (available map[int][]*Auth, cooldownCount int, earliest time.Time) {
 	available = make(map[int][]*Auth)
-	for i := 0; i < len(auths); i++ {
-		candidate := auths[i]
+	for i := 0; i < len(credentials); i++ {
+		candidate := credentials[i]
 		blocked, reason, next := isAuthBlockedForModel(candidate, model, now)
 		if !blocked {
 			priority := authPriority(candidate)
@@ -211,14 +211,14 @@ func collectAvailableByPriority(auths []*Auth, model string, now time.Time) (ava
 	return available, cooldownCount, earliest
 }
 
-func getAvailableAuths(auths []*Auth, provider, model string, now time.Time) ([]*Auth, error) {
-	if len(auths) == 0 {
+func getAvailableAuths(credentials []*Auth, provider, model string, now time.Time) ([]*Auth, error) {
+	if len(credentials) == 0 {
 		return nil, &Error{Code: "auth_not_found", Message: "no auth candidates"}
 	}
 
-	availableByPriority, cooldownCount, earliest := collectAvailableByPriority(auths, model, now)
+	availableByPriority, cooldownCount, earliest := collectAvailableByPriority(credentials, model, now)
 	if len(availableByPriority) == 0 {
-		if cooldownCount == len(auths) && !earliest.IsZero() {
+		if cooldownCount == len(credentials) && !earliest.IsZero() {
 			providerForError := provider
 			if providerForError == "mixed" {
 				providerForError = ""
@@ -249,13 +249,13 @@ func getAvailableAuths(auths []*Auth, provider, model string, now time.Time) ([]
 }
 
 // Pick selects the next available auth for the provider in a round-robin manner.
-// For gemini-cli virtual auths (identified by the gemini_virtual_parent attribute),
+// For gemini-cli virtual credentials (identified by the gemini_virtual_parent attribute),
 // a two-level round-robin is used: first cycling across credential groups (parent
-// accounts), then cycling within each group's project auths.
-func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, auths []*Auth) (*Auth, error) {
+// accounts), then cycling within each group's project credentials.
+func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, credentials []*Auth) (*Auth, error) {
 	_ = opts
 	now := time.Now()
-	available, err := getAvailableAuths(auths, provider, model, now)
+	available, err := getAvailableAuths(credentials, provider, model, now)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +271,7 @@ func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, o
 	}
 
 	// Check if any available auth has gemini_virtual_parent attribute,
-	// indicating gemini-cli virtual auths that should use credential-level polling.
+	// indicating gemini-cli virtual credentials that should use credential-level polling.
 	groups, parentOrder := groupByVirtualParent(available)
 	if len(parentOrder) > 1 {
 		// Two-level round-robin: first select a credential group, then pick within it.
@@ -302,7 +302,7 @@ func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, o
 		return group[innerIndex%len(group)], nil
 	}
 
-	// Flat round-robin for non-grouped auths (original behavior).
+	// Flat round-robin for non-grouped credentials (original behavior).
 	s.ensureCursorKey(key, limit)
 	index := s.cursors[key]
 	if index >= 2_147_483_640 {
@@ -321,16 +321,16 @@ func (s *RoundRobinSelector) ensureCursorKey(key string, limit int) {
 	}
 }
 
-// groupByVirtualParent groups auths by their gemini_virtual_parent attribute.
-// Returns a map of parentID -> auths and a sorted slice of parent IDs for stable iteration.
-// Only auths with a non-empty gemini_virtual_parent are grouped; if any auth lacks
+// groupByVirtualParent groups credentials by their gemini_virtual_parent attribute.
+// Returns a map of parentID -> credentials and a sorted slice of parent IDs for stable iteration.
+// Only credentials with a non-empty gemini_virtual_parent are grouped; if any auth lacks
 // this attribute, nil/nil is returned so the caller falls back to flat round-robin.
-func groupByVirtualParent(auths []*Auth) (map[string][]*Auth, []string) {
-	if len(auths) == 0 {
+func groupByVirtualParent(credentials []*Auth) (map[string][]*Auth, []string) {
+	if len(credentials) == 0 {
 		return nil, nil
 	}
 	groups := make(map[string][]*Auth)
-	for _, a := range auths {
+	for _, a := range credentials {
 		parent := ""
 		if a.Attributes != nil {
 			parent = strings.TrimSpace(a.Attributes["gemini_virtual_parent"])
@@ -351,10 +351,10 @@ func groupByVirtualParent(auths []*Auth) (map[string][]*Auth, []string) {
 }
 
 // Pick selects the first available auth for the provider in a deterministic manner.
-func (s *FillFirstSelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, auths []*Auth) (*Auth, error) {
+func (s *FillFirstSelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, credentials []*Auth) (*Auth, error) {
 	_ = opts
 	now := time.Now()
-	available, err := getAvailableAuths(auths, provider, model, now)
+	available, err := getAvailableAuths(credentials, provider, model, now)
 	if err != nil {
 		return nil, err
 	}

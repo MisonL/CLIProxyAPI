@@ -12,6 +12,7 @@ import (
 	gin "github.com/gin-gonic/gin"
 	proxyconfig "github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	internallogging "github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/platform"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
@@ -23,8 +24,8 @@ func newTestServer(t *testing.T) *Server {
 	gin.SetMode(gin.TestMode)
 
 	tmpDir := t.TempDir()
-	authDir := filepath.Join(tmpDir, "auth")
-	if err := os.MkdirAll(authDir, 0o700); err != nil {
+	credentialsDir := filepath.Join(tmpDir, "auth")
+	if err := os.MkdirAll(credentialsDir, 0o700); err != nil {
 		t.Fatalf("failed to create auth dir: %v", err)
 	}
 
@@ -33,7 +34,7 @@ func newTestServer(t *testing.T) *Server {
 			APIKeys: []string{"test-key"},
 		},
 		Port:                   0,
-		AuthDir:                authDir,
+		CredentialsDir:         credentialsDir,
 		Debug:                  true,
 		LoggingToFile:          false,
 		UsageStatisticsEnabled: false,
@@ -112,6 +113,59 @@ func TestAmpProviderModelRoutes(t *testing.T) {
 	}
 }
 
+func TestManagementRoutes_DoNotRegisterLegacyAuthFileRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tmpDir := t.TempDir()
+	credentialsDir := filepath.Join(tmpDir, "auth")
+	if err := os.MkdirAll(credentialsDir, 0o700); err != nil {
+		t.Fatalf("failed to create auth dir: %v", err)
+	}
+
+	cfg := &proxyconfig.Config{
+		SDKConfig: sdkconfig.SDKConfig{
+			APIKeys: []string{"test-key"},
+		},
+		Port:           0,
+		CredentialsDir: credentialsDir,
+		Debug:          true,
+		RemoteManagement: proxyconfig.RemoteManagement{
+			AllowRemote: true,
+			SecretKey:   "test-secret",
+		},
+	}
+
+	authManager := auth.NewManager(nil, nil, nil)
+	accessManager := sdkaccess.NewManager()
+	server := NewServer(cfg, authManager, accessManager, filepath.Join(tmpDir, "config.yaml"))
+
+	req := httptest.NewRequest(http.MethodGet, "/v0/management/auth-files", nil)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	rec := httptest.NewRecorder()
+	server.engine.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when legacy auth-files routes are unavailable, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	serverWithPlatform := NewServer(
+		cfg,
+		authManager,
+		accessManager,
+		filepath.Join(tmpDir, "config-platform.yaml"),
+		WithPlatformRuntime(&platform.Runtime{}),
+	)
+
+	reqWithPlatform := httptest.NewRequest(http.MethodGet, "/v0/management/auth-files", nil)
+	reqWithPlatform.Header.Set("Authorization", "Bearer test-secret")
+	recWithPlatform := httptest.NewRecorder()
+	serverWithPlatform.engine.ServeHTTP(recWithPlatform, reqWithPlatform)
+
+	if recWithPlatform.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 with platform runtime too, got %d body=%s", recWithPlatform.Code, recWithPlatform.Body.String())
+	}
+}
+
 func TestDefaultRequestLoggerFactory_UsesResolvedLogDirectory(t *testing.T) {
 	t.Setenv("WRITABLE_PATH", "")
 	t.Setenv("writable_path", "")
@@ -131,7 +185,7 @@ func TestDefaultRequestLoggerFactory_UsesResolvedLogDirectory(t *testing.T) {
 		}
 	}()
 
-	// Force ResolveLogDirectory to fallback to auth-dir/logs by making ./logs not a writable directory.
+	// Force ResolveLogDirectory to fallback to config-dir/logs by making ./logs not a writable directory.
 	if errWriteFile := os.WriteFile(filepath.Join(tmpDir, "logs"), []byte("not-a-directory"), 0o644); errWriteFile != nil {
 		t.Fatalf("failed to create blocking logs file: %v", errWriteFile)
 	}
@@ -142,16 +196,10 @@ func TestDefaultRequestLoggerFactory_UsesResolvedLogDirectory(t *testing.T) {
 	}
 	configPath := filepath.Join(configDir, "config.yaml")
 
-	authDir := filepath.Join(tmpDir, "auth")
-	if errMkdirAuth := os.MkdirAll(authDir, 0o700); errMkdirAuth != nil {
-		t.Fatalf("failed to create auth dir: %v", errMkdirAuth)
-	}
-
 	cfg := &proxyconfig.Config{
 		SDKConfig: proxyconfig.SDKConfig{
 			RequestLog: false,
 		},
-		AuthDir:           authDir,
 		ErrorLogsMaxFiles: 10,
 	}
 
@@ -181,30 +229,19 @@ func TestDefaultRequestLoggerFactory_UsesResolvedLogDirectory(t *testing.T) {
 		t.Fatalf("failed to write forced error request log: %v", errLog)
 	}
 
-	authLogsDir := filepath.Join(authDir, "logs")
-	authEntries, errReadAuthDir := os.ReadDir(authLogsDir)
-	if errReadAuthDir != nil {
-		t.Fatalf("failed to read auth logs dir %s: %v", authLogsDir, errReadAuthDir)
+	configLogsDir := filepath.Join(configDir, "logs")
+	configEntries, errReadConfigDir := os.ReadDir(configLogsDir)
+	if errReadConfigDir != nil {
+		t.Fatalf("failed to inspect config logs dir %s: %v", configLogsDir, errReadConfigDir)
 	}
-	foundErrorLogInAuthDir := false
-	for _, entry := range authEntries {
+	foundErrorLogInConfigDir := false
+	for _, entry := range configEntries {
 		if strings.HasPrefix(entry.Name(), "error-") && strings.HasSuffix(entry.Name(), ".log") {
-			foundErrorLogInAuthDir = true
+			foundErrorLogInConfigDir = true
 			break
 		}
 	}
-	if !foundErrorLogInAuthDir {
-		t.Fatalf("expected forced error log in auth fallback dir %s, got entries: %+v", authLogsDir, authEntries)
-	}
-
-	configLogsDir := filepath.Join(configDir, "logs")
-	configEntries, errReadConfigDir := os.ReadDir(configLogsDir)
-	if errReadConfigDir != nil && !os.IsNotExist(errReadConfigDir) {
-		t.Fatalf("failed to inspect config logs dir %s: %v", configLogsDir, errReadConfigDir)
-	}
-	for _, entry := range configEntries {
-		if strings.HasPrefix(entry.Name(), "error-") && strings.HasSuffix(entry.Name(), ".log") {
-			t.Fatalf("unexpected forced error log in config dir %s", configLogsDir)
-		}
+	if !foundErrorLogInConfigDir {
+		t.Fatalf("expected forced error log in config dir %s, got entries: %+v", configLogsDir, configEntries)
 	}
 }

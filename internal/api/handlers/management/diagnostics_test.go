@@ -19,13 +19,12 @@ func TestGetSystemSelfCheckReturnsChecks(t *testing.T) {
 
 	baseDir := t.TempDir()
 	configPath := filepath.Join(baseDir, "config.yaml")
-	authDir := filepath.Join(baseDir, "auths")
 	logDir := filepath.Join(baseDir, "logs")
 	staticDir := filepath.Join(baseDir, "static")
 	if err := os.WriteFile(configPath, []byte("debug: false\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	for _, dir := range []string{authDir, logDir, staticDir} {
+	for _, dir := range []string{logDir, staticDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
 		}
@@ -41,7 +40,6 @@ func TestGetSystemSelfCheckReturnsChecks(t *testing.T) {
 	t.Setenv("MANAGEMENT_STATIC_PATH", staticDir)
 	h := &Handler{
 		cfg: &config.Config{
-			AuthDir: authDir,
 			RemoteManagement: config.RemoteManagement{
 				AllowRemote: true,
 			},

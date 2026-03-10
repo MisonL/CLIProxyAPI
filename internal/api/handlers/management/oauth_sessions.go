@@ -20,6 +20,9 @@ var (
 	errInvalidOAuthState      = errors.New("invalid oauth state")
 	errUnsupportedOAuthFlow   = errors.New("unsupported oauth provider")
 	errOAuthSessionNotPending = errors.New("oauth session is not pending")
+	oauthScratchDirOnce       sync.Once
+	oauthScratchDir           string
+	oauthScratchDirErr        error
 )
 
 type oauthSession struct {
@@ -242,10 +245,32 @@ type oauthCallbackFilePayload struct {
 	Error string `json:"error"`
 }
 
-func WriteOAuthCallbackFile(authDir, provider, state, code, errorMessage string) (string, error) {
-	if strings.TrimSpace(authDir) == "" {
-		return "", fmt.Errorf("auth dir is empty")
+func OAuthCallbackFilePath(provider, state string) (string, error) {
+	canonicalProvider, err := NormalizeOAuthProvider(provider)
+	if err != nil {
+		return "", err
 	}
+	if err = ValidateOAuthState(state); err != nil {
+		return "", err
+	}
+	dir, err := resolveOAuthScratchDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, fmt.Sprintf(".oauth-%s-%s.oauth", canonicalProvider, state)), nil
+}
+
+func resolveOAuthScratchDir() (string, error) {
+	oauthScratchDirOnce.Do(func() {
+		oauthScratchDir, oauthScratchDirErr = os.MkdirTemp("", "cliproxy-oauth-*")
+	})
+	if oauthScratchDirErr != nil {
+		return "", oauthScratchDirErr
+	}
+	return oauthScratchDir, nil
+}
+
+func WriteOAuthCallbackFile(provider, state, code, errorMessage string) (string, error) {
 	canonicalProvider, err := NormalizeOAuthProvider(provider)
 	if err != nil {
 		return "", err
@@ -254,8 +279,10 @@ func WriteOAuthCallbackFile(authDir, provider, state, code, errorMessage string)
 		return "", err
 	}
 
-	fileName := fmt.Sprintf(".oauth-%s-%s.oauth", canonicalProvider, state)
-	filePath := filepath.Join(authDir, fileName)
+	filePath, err := OAuthCallbackFilePath(canonicalProvider, state)
+	if err != nil {
+		return "", err
+	}
 	payload := oauthCallbackFilePayload{
 		Code:  strings.TrimSpace(code),
 		State: strings.TrimSpace(state),
@@ -271,7 +298,7 @@ func WriteOAuthCallbackFile(authDir, provider, state, code, errorMessage string)
 	return filePath, nil
 }
 
-func WriteOAuthCallbackFileForPendingSession(authDir, provider, state, code, errorMessage string) (string, error) {
+func WriteOAuthCallbackFileForPendingSession(provider, state, code, errorMessage string) (string, error) {
 	canonicalProvider, err := NormalizeOAuthProvider(provider)
 	if err != nil {
 		return "", err
@@ -279,5 +306,5 @@ func WriteOAuthCallbackFileForPendingSession(authDir, provider, state, code, err
 	if !IsOAuthSessionPending(state, canonicalProvider) {
 		return "", errOAuthSessionNotPending
 	}
-	return WriteOAuthCallbackFile(authDir, canonicalProvider, state, code, errorMessage)
+	return WriteOAuthCallbackFile(canonicalProvider, state, code, errorMessage)
 }

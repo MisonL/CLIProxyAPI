@@ -19,10 +19,6 @@ func (h *Handler) ImportVertexCredential(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "config unavailable"})
 		return
 	}
-	if h.cfg.AuthDir == "" {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "auth directory not configured"})
-		return
-	}
 
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
@@ -101,19 +97,23 @@ func (h *Handler) ImportVertexCredential(c *gin.Context) {
 	if reqCtx := c.Request.Context(); reqCtx != nil {
 		ctx = reqCtx
 	}
-	savedPath, err := h.saveTokenRecord(ctx, record)
+	savedRef, err := h.saveTokenRecord(ctx, record)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "save_failed", "message": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status":     "ok",
-		"auth-file":  savedPath,
-		"project_id": projectID,
-		"email":      email,
-		"location":   location,
-	})
+	response := gin.H{
+		"status":          "ok",
+		"credential_id":   savedRef,
+		"credential_ref":  savedRef,
+		"credential_name": record.FileName,
+		"runtime_id":      record.ID,
+		"project_id":      projectID,
+		"email":           email,
+		"location":        location,
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func valueAsString(v any) string {

@@ -1167,7 +1167,7 @@ func (r *ModelRegistry) GetFirstAvailableModel(handlerType string) (string, erro
 
 // GetModelsForClient returns the models registered for a specific client.
 // Parameters:
-//   - clientID: The client identifier (typically auth file name or auth ID)
+//   - clientID: The client identifier (typically credential file name or auth ID)
 //
 // Returns:
 //   - []*ModelInfo: List of models registered for this client, nil if client not found

@@ -23,14 +23,14 @@ func NewFileSynthesizer() *FileSynthesizer {
 	return &FileSynthesizer{}
 }
 
-// Synthesize generates Auth entries from auth files in the auth directory.
+// Synthesize generates Auth entries from credential files in the credentials directory.
 func (s *FileSynthesizer) Synthesize(ctx *SynthesisContext) ([]*coreauth.Auth, error) {
 	out := make([]*coreauth.Auth, 0, 16)
-	if ctx == nil || ctx.AuthDir == "" {
+	if ctx == nil || ctx.CredentialsDir == "" {
 		return out, nil
 	}
 
-	entries, err := os.ReadDir(ctx.AuthDir)
+	entries, err := os.ReadDir(ctx.CredentialsDir)
 	if err != nil {
 		// Not an error if directory doesn't exist
 		return out, nil
@@ -44,23 +44,23 @@ func (s *FileSynthesizer) Synthesize(ctx *SynthesisContext) ([]*coreauth.Auth, e
 		if !strings.HasSuffix(strings.ToLower(name), ".json") {
 			continue
 		}
-		full := filepath.Join(ctx.AuthDir, name)
+		full := filepath.Join(ctx.CredentialsDir, name)
 		data, errRead := os.ReadFile(full)
 		if errRead != nil || len(data) == 0 {
 			continue
 		}
-		auths := synthesizeFileAuths(ctx, full, data)
-		if len(auths) == 0 {
+		credentials := synthesizeFileAuths(ctx, full, data)
+		if len(credentials) == 0 {
 			continue
 		}
-		out = append(out, auths...)
+		out = append(out, credentials...)
 	}
 	return out, nil
 }
 
-// SynthesizeAuthFile generates Auth entries for one auth JSON file payload.
+// SynthesizeCredentialFile generates Auth entries for one auth JSON file payload.
 // It shares exactly the same mapping behavior as FileSynthesizer.Synthesize.
-func SynthesizeAuthFile(ctx *SynthesisContext, fullPath string, data []byte) []*coreauth.Auth {
+func SynthesizeCredentialFile(ctx *SynthesisContext, fullPath string, data []byte) []*coreauth.Auth {
 	return synthesizeFileAuths(ctx, fullPath, data)
 }
 
@@ -86,10 +86,10 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) []
 	if email, _ := metadata["email"].(string); email != "" {
 		label = email
 	}
-	// Use relative path under authDir as ID to stay consistent with the file-based token store.
+	// Use relative path under credentialsDir as ID to stay consistent with the file-based token store.
 	id := fullPath
-	if strings.TrimSpace(ctx.AuthDir) != "" {
-		if rel, errRel := filepath.Rel(ctx.AuthDir, fullPath); errRel == nil && rel != "" {
+	if strings.TrimSpace(ctx.CredentialsDir) != "" {
+		if rel, errRel := filepath.Rel(ctx.CredentialsDir, fullPath); errRel == nil && rel != "" {
 			id = rel
 		}
 	}
@@ -136,7 +136,7 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) []
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	// Read priority from auth file.
+	// Read priority from credential file.
 	if rawPriority, ok := metadata["priority"]; ok {
 		switch v := rawPriority.(type) {
 		case float64:
@@ -206,7 +206,7 @@ func SynthesizeGeminiVirtualAuths(primary *coreauth.Auth, metadata map[string]an
 		if authPath != "" {
 			attrs["path"] = authPath
 		}
-		// Propagate priority from primary auth to virtual auths
+		// Propagate priority from primary auth to virtual credentials
 		if priorityVal, hasPriority := primary.Attributes["priority"]; hasPriority && priorityVal != "" {
 			attrs["priority"] = priorityVal
 		}

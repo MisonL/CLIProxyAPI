@@ -60,7 +60,7 @@ func (Executor) Refresh(ctx context.Context, a *coreauth.Auth) (*coreauth.Auth, 
 Register the executor with the core manager before starting the service:
 
 ```go
-core := coreauth.NewManager(coreauth.NewFileStore(cfg.AuthDir), nil, nil)
+core := coreauth.NewManager(coreauth.NewFileStore(cfg.CredentialsDir), nil, nil)
 core.RegisterExecutor(myprov.Executor{})
 svc, _ := cliproxy.NewBuilder().WithConfig(cfg).WithConfigPath(cfgPath).WithCoreAuthManager(core).Build()
 ```

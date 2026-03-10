@@ -21,29 +21,29 @@ func TestNewFileSynthesizer(t *testing.T) {
 
 func TestFileSynthesizer_Synthesize_NilContext(t *testing.T) {
 	synth := NewFileSynthesizer()
-	auths, err := synth.Synthesize(nil)
+	credentials, err := synth.Synthesize(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 0 {
-		t.Fatalf("expected empty auths, got %d", len(auths))
+	if len(credentials) != 0 {
+		t.Fatalf("expected empty credentials, got %d", len(credentials))
 	}
 }
 
-func TestFileSynthesizer_Synthesize_EmptyAuthDir(t *testing.T) {
+func TestFileSynthesizer_Synthesize_EmptyCredentialsDir(t *testing.T) {
 	synth := NewFileSynthesizer()
 	ctx := &SynthesisContext{
 		Config:      &config.Config{},
-		AuthDir:     "",
+		CredentialsDir:     "",
 		Now:         time.Now(),
 		IDGenerator: NewStableIDGenerator(),
 	}
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 0 {
-		t.Fatalf("expected empty auths, got %d", len(auths))
+	if len(credentials) != 0 {
+		t.Fatalf("expected empty credentials, got %d", len(credentials))
 	}
 }
 
@@ -51,23 +51,23 @@ func TestFileSynthesizer_Synthesize_NonExistentDir(t *testing.T) {
 	synth := NewFileSynthesizer()
 	ctx := &SynthesisContext{
 		Config:      &config.Config{},
-		AuthDir:     "/non/existent/path",
+		CredentialsDir:     "/non/existent/path",
 		Now:         time.Now(),
 		IDGenerator: NewStableIDGenerator(),
 	}
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 0 {
-		t.Fatalf("expected empty auths, got %d", len(auths))
+	if len(credentials) != 0 {
+		t.Fatalf("expected empty credentials, got %d", len(credentials))
 	}
 }
 
 func TestFileSynthesizer_Synthesize_ValidAuthFile(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// Create a valid auth file
+	// Create a valid credential file
 	authData := map[string]any{
 		"type":            "claude",
 		"email":           "test@example.com",
@@ -79,45 +79,45 @@ func TestFileSynthesizer_Synthesize_ValidAuthFile(t *testing.T) {
 	data, _ := json.Marshal(authData)
 	err := os.WriteFile(filepath.Join(tempDir, "claude-auth.json"), data, 0644)
 	if err != nil {
-		t.Fatalf("failed to write auth file: %v", err)
+		t.Fatalf("failed to write credential file: %v", err)
 	}
 
 	synth := NewFileSynthesizer()
 	ctx := &SynthesisContext{
 		Config:      &config.Config{},
-		AuthDir:     tempDir,
+		CredentialsDir:     tempDir,
 		Now:         time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("expected 1 auth, got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(credentials))
 	}
 
-	if auths[0].Provider != "claude" {
-		t.Errorf("expected provider claude, got %s", auths[0].Provider)
+	if credentials[0].Provider != "claude" {
+		t.Errorf("expected provider claude, got %s", credentials[0].Provider)
 	}
-	if auths[0].Label != "test@example.com" {
-		t.Errorf("expected label test@example.com, got %s", auths[0].Label)
+	if credentials[0].Label != "test@example.com" {
+		t.Errorf("expected label test@example.com, got %s", credentials[0].Label)
 	}
-	if auths[0].Prefix != "test-prefix" {
-		t.Errorf("expected prefix test-prefix, got %s", auths[0].Prefix)
+	if credentials[0].Prefix != "test-prefix" {
+		t.Errorf("expected prefix test-prefix, got %s", credentials[0].Prefix)
 	}
-	if auths[0].ProxyURL != "http://proxy.local" {
-		t.Errorf("expected proxy_url http://proxy.local, got %s", auths[0].ProxyURL)
+	if credentials[0].ProxyURL != "http://proxy.local" {
+		t.Errorf("expected proxy_url http://proxy.local, got %s", credentials[0].ProxyURL)
 	}
-	if v, ok := auths[0].Metadata["disable_cooling"].(bool); !ok || !v {
-		t.Errorf("expected disable_cooling true, got %v", auths[0].Metadata["disable_cooling"])
+	if v, ok := credentials[0].Metadata["disable_cooling"].(bool); !ok || !v {
+		t.Errorf("expected disable_cooling true, got %v", credentials[0].Metadata["disable_cooling"])
 	}
-	if v, ok := auths[0].Metadata["request_retry"].(float64); !ok || int(v) != 2 {
-		t.Errorf("expected request_retry 2, got %v", auths[0].Metadata["request_retry"])
+	if v, ok := credentials[0].Metadata["request_retry"].(float64); !ok || int(v) != 2 {
+		t.Errorf("expected request_retry 2, got %v", credentials[0].Metadata["request_retry"])
 	}
-	if auths[0].Status != coreauth.StatusActive {
-		t.Errorf("expected status active, got %s", auths[0].Status)
+	if credentials[0].Status != coreauth.StatusActive {
+		t.Errorf("expected status active, got %s", credentials[0].Status)
 	}
 }
 
@@ -132,27 +132,27 @@ func TestFileSynthesizer_Synthesize_GeminiProviderMapping(t *testing.T) {
 	data, _ := json.Marshal(authData)
 	err := os.WriteFile(filepath.Join(tempDir, "gemini-auth.json"), data, 0644)
 	if err != nil {
-		t.Fatalf("failed to write auth file: %v", err)
+		t.Fatalf("failed to write credential file: %v", err)
 	}
 
 	synth := NewFileSynthesizer()
 	ctx := &SynthesisContext{
 		Config:      &config.Config{},
-		AuthDir:     tempDir,
+		CredentialsDir:     tempDir,
 		Now:         time.Now(),
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("expected 1 auth, got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(credentials))
 	}
 
-	if auths[0].Provider != "gemini-cli" {
-		t.Errorf("gemini should be mapped to gemini-cli, got %s", auths[0].Provider)
+	if credentials[0].Provider != "gemini-cli" {
+		t.Errorf("gemini should be mapped to gemini-cli, got %s", credentials[0].Provider)
 	}
 }
 
@@ -172,20 +172,20 @@ func TestFileSynthesizer_Synthesize_SkipsInvalidFiles(t *testing.T) {
 	synth := NewFileSynthesizer()
 	ctx := &SynthesisContext{
 		Config:      &config.Config{},
-		AuthDir:     tempDir,
+		CredentialsDir:     tempDir,
 		Now:         time.Now(),
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("only valid auth file should be processed, got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("only valid credential file should be processed, got %d", len(credentials))
 	}
-	if auths[0].Label != "valid@example.com" {
-		t.Errorf("expected label valid@example.com, got %s", auths[0].Label)
+	if credentials[0].Label != "valid@example.com" {
+		t.Errorf("expected label valid@example.com, got %s", credentials[0].Label)
 	}
 }
 
@@ -206,17 +206,17 @@ func TestFileSynthesizer_Synthesize_SkipsDirectories(t *testing.T) {
 	synth := NewFileSynthesizer()
 	ctx := &SynthesisContext{
 		Config:      &config.Config{},
-		AuthDir:     tempDir,
+		CredentialsDir:     tempDir,
 		Now:         time.Now(),
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("expected 1 auth, got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(credentials))
 	}
 }
 
@@ -227,28 +227,28 @@ func TestFileSynthesizer_Synthesize_RelativeID(t *testing.T) {
 	data, _ := json.Marshal(authData)
 	err := os.WriteFile(filepath.Join(tempDir, "my-auth.json"), data, 0644)
 	if err != nil {
-		t.Fatalf("failed to write auth file: %v", err)
+		t.Fatalf("failed to write credential file: %v", err)
 	}
 
 	synth := NewFileSynthesizer()
 	ctx := &SynthesisContext{
 		Config:      &config.Config{},
-		AuthDir:     tempDir,
+		CredentialsDir:     tempDir,
 		Now:         time.Now(),
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("expected 1 auth, got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(credentials))
 	}
 
 	// ID should be relative path
-	if auths[0].ID != "my-auth.json" {
-		t.Errorf("expected ID my-auth.json, got %s", auths[0].ID)
+	if credentials[0].ID != "my-auth.json" {
+		t.Errorf("expected ID my-auth.json, got %s", credentials[0].ID)
 	}
 }
 
@@ -278,20 +278,20 @@ func TestFileSynthesizer_Synthesize_PrefixValidation(t *testing.T) {
 			synth := NewFileSynthesizer()
 			ctx := &SynthesisContext{
 				Config:      &config.Config{},
-				AuthDir:     tempDir,
+				CredentialsDir:     tempDir,
 				Now:         time.Now(),
 				IDGenerator: NewStableIDGenerator(),
 			}
 
-			auths, err := synth.Synthesize(ctx)
+			credentials, err := synth.Synthesize(ctx)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if len(auths) != 1 {
-				t.Fatalf("expected 1 auth, got %d", len(auths))
+			if len(credentials) != 1 {
+				t.Fatalf("expected 1 auth, got %d", len(credentials))
 			}
-			if auths[0].Prefix != tt.wantPrefix {
-				t.Errorf("expected prefix %q, got %q", tt.wantPrefix, auths[0].Prefix)
+			if credentials[0].Prefix != tt.wantPrefix {
+				t.Errorf("expected prefix %q, got %q", tt.wantPrefix, credentials[0].Prefix)
 			}
 		})
 	}
@@ -333,26 +333,26 @@ func TestFileSynthesizer_Synthesize_PriorityParsing(t *testing.T) {
 			data, _ := json.Marshal(authData)
 			errWriteFile := os.WriteFile(filepath.Join(tempDir, "auth.json"), data, 0644)
 			if errWriteFile != nil {
-				t.Fatalf("failed to write auth file: %v", errWriteFile)
+				t.Fatalf("failed to write credential file: %v", errWriteFile)
 			}
 
 			synth := NewFileSynthesizer()
 			ctx := &SynthesisContext{
 				Config:      &config.Config{},
-				AuthDir:     tempDir,
+				CredentialsDir:     tempDir,
 				Now:         time.Now(),
 				IDGenerator: NewStableIDGenerator(),
 			}
 
-			auths, errSynthesize := synth.Synthesize(ctx)
+			credentials, errSynthesize := synth.Synthesize(ctx)
 			if errSynthesize != nil {
 				t.Fatalf("unexpected error: %v", errSynthesize)
 			}
-			if len(auths) != 1 {
-				t.Fatalf("expected 1 auth, got %d", len(auths))
+			if len(credentials) != 1 {
+				t.Fatalf("expected 1 auth, got %d", len(credentials))
 			}
 
-			value, ok := auths[0].Attributes["priority"]
+			value, ok := credentials[0].Attributes["priority"]
 			if tt.hasValue {
 				if !ok {
 					t.Fatal("expected priority attribute to be set")
@@ -378,7 +378,7 @@ func TestFileSynthesizer_Synthesize_OAuthExcludedModelsMerged(t *testing.T) {
 	data, _ := json.Marshal(authData)
 	errWriteFile := os.WriteFile(filepath.Join(tempDir, "auth.json"), data, 0644)
 	if errWriteFile != nil {
-		t.Fatalf("failed to write auth file: %v", errWriteFile)
+		t.Fatalf("failed to write credential file: %v", errWriteFile)
 	}
 
 	synth := NewFileSynthesizer()
@@ -388,20 +388,20 @@ func TestFileSynthesizer_Synthesize_OAuthExcludedModelsMerged(t *testing.T) {
 				"claude": {"shared", "model-b"},
 			},
 		},
-		AuthDir:     tempDir,
+		CredentialsDir:     tempDir,
 		Now:         time.Now(),
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, errSynthesize := synth.Synthesize(ctx)
+	credentials, errSynthesize := synth.Synthesize(ctx)
 	if errSynthesize != nil {
 		t.Fatalf("unexpected error: %v", errSynthesize)
 	}
-	if len(auths) != 1 {
-		t.Fatalf("expected 1 auth, got %d", len(auths))
+	if len(credentials) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(credentials))
 	}
 
-	got := auths[0].Attributes["excluded_models"]
+	got := credentials[0].Attributes["excluded_models"]
 	want := "custom-model,model-b,shared"
 	if got != want {
 		t.Fatalf("expected excluded_models %q, got %q", want, got)
@@ -639,7 +639,7 @@ func TestSplitGeminiProjectIDs(t *testing.T) {
 func TestFileSynthesizer_Synthesize_MultiProjectGemini(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// Create a gemini auth file with multiple projects
+	// Create a gemini credential file with multiple projects
 	authData := map[string]any{
 		"type":       "gemini",
 		"email":      "multi@example.com",
@@ -649,28 +649,28 @@ func TestFileSynthesizer_Synthesize_MultiProjectGemini(t *testing.T) {
 	data, _ := json.Marshal(authData)
 	err := os.WriteFile(filepath.Join(tempDir, "gemini-multi.json"), data, 0644)
 	if err != nil {
-		t.Fatalf("failed to write auth file: %v", err)
+		t.Fatalf("failed to write credential file: %v", err)
 	}
 
 	synth := NewFileSynthesizer()
 	ctx := &SynthesisContext{
 		Config:      &config.Config{},
-		AuthDir:     tempDir,
+		CredentialsDir:     tempDir,
 		Now:         time.Now(),
 		IDGenerator: NewStableIDGenerator(),
 	}
 
-	auths, err := synth.Synthesize(ctx)
+	credentials, err := synth.Synthesize(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Should have 4 auths: 1 primary (disabled) + 3 virtuals
-	if len(auths) != 4 {
-		t.Fatalf("expected 4 auths (1 primary + 3 virtuals), got %d", len(auths))
+	// Should have 4 credentials: 1 primary (disabled) + 3 virtuals
+	if len(credentials) != 4 {
+		t.Fatalf("expected 4 credentials (1 primary + 3 virtuals), got %d", len(credentials))
 	}
 
 	// First auth should be the primary (disabled)
-	primary := auths[0]
+	primary := credentials[0]
 	if !primary.Disabled {
 		t.Error("expected primary to be disabled")
 	}
@@ -681,9 +681,9 @@ func TestFileSynthesizer_Synthesize_MultiProjectGemini(t *testing.T) {
 		t.Errorf("expected primary priority 10, got %q", gotPriority)
 	}
 
-	// Remaining auths should be virtuals
+	// Remaining credentials should be virtuals
 	for i := 1; i < 4; i++ {
-		v := auths[i]
+		v := credentials[i]
 		if v.Status != coreauth.StatusActive {
 			t.Errorf("expected virtual %d to be active, got %s", i, v.Status)
 		}

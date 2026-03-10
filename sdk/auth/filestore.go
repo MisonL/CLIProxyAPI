@@ -38,10 +38,10 @@ func (s *FileTokenStore) SetBaseDir(dir string) {
 	s.dirLock.Unlock()
 }
 
-// Save persists token storage and metadata to the resolved auth file path.
+// Save persists token storage and metadata to the resolved credential file path.
 func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (string, error) {
 	if auth == nil {
-		return "", fmt.Errorf("auth filestore: auth is nil")
+		return "", fmt.Errorf("credential filestore: auth is nil")
 	}
 
 	path, err := s.resolveAuthPath(auth)
@@ -49,7 +49,7 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 		return "", err
 	}
 	if path == "" {
-		return "", fmt.Errorf("auth filestore: missing file path attribute for %s", auth.ID)
+		return "", fmt.Errorf("credential filestore: missing file path attribute for %s", auth.ID)
 	}
 
 	if auth.Disabled {
@@ -62,7 +62,7 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 	defer s.mu.Unlock()
 
 	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", fmt.Errorf("auth filestore: create dir failed: %w", err)
+		return "", fmt.Errorf("credential filestore: create dir failed: %w", err)
 	}
 
 	// metadataSetter is a private interface for TokenStorage implementations that support metadata injection.
@@ -82,7 +82,7 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 		auth.Metadata["disabled"] = auth.Disabled
 		raw, errMarshal := json.Marshal(auth.Metadata)
 		if errMarshal != nil {
-			return "", fmt.Errorf("auth filestore: marshal metadata failed: %w", errMarshal)
+			return "", fmt.Errorf("credential filestore: marshal metadata failed: %w", errMarshal)
 		}
 		if existing, errRead := os.ReadFile(path); errRead == nil {
 			if jsonEqual(existing, raw) {
@@ -90,24 +90,24 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 			}
 			file, errOpen := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0o600)
 			if errOpen != nil {
-				return "", fmt.Errorf("auth filestore: open existing failed: %w", errOpen)
+				return "", fmt.Errorf("credential filestore: open existing failed: %w", errOpen)
 			}
 			if _, errWrite := file.Write(raw); errWrite != nil {
 				_ = file.Close()
-				return "", fmt.Errorf("auth filestore: write existing failed: %w", errWrite)
+				return "", fmt.Errorf("credential filestore: write existing failed: %w", errWrite)
 			}
 			if errClose := file.Close(); errClose != nil {
-				return "", fmt.Errorf("auth filestore: close existing failed: %w", errClose)
+				return "", fmt.Errorf("credential filestore: close existing failed: %w", errClose)
 			}
 			return path, nil
 		} else if !os.IsNotExist(errRead) {
-			return "", fmt.Errorf("auth filestore: read existing failed: %w", errRead)
+			return "", fmt.Errorf("credential filestore: read existing failed: %w", errRead)
 		}
 		if errWrite := os.WriteFile(path, raw, 0o600); errWrite != nil {
-			return "", fmt.Errorf("auth filestore: write file failed: %w", errWrite)
+			return "", fmt.Errorf("credential filestore: write file failed: %w", errWrite)
 		}
 	default:
-		return "", fmt.Errorf("auth filestore: nothing to persist for %s", auth.ID)
+		return "", fmt.Errorf("credential filestore: nothing to persist for %s", auth.ID)
 	}
 
 	if auth.Attributes == nil {
@@ -126,7 +126,7 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 func (s *FileTokenStore) List(ctx context.Context) ([]*cliproxyauth.Auth, error) {
 	dir := s.baseDirSnapshot()
 	if dir == "" {
-		return nil, fmt.Errorf("auth filestore: directory not configured")
+		return nil, fmt.Errorf("credential filestore: directory not configured")
 	}
 	entries := make([]*cliproxyauth.Auth, 0)
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
@@ -154,18 +154,18 @@ func (s *FileTokenStore) List(ctx context.Context) ([]*cliproxyauth.Auth, error)
 	return entries, nil
 }
 
-// Delete removes the auth file.
+// Delete removes the credential file.
 func (s *FileTokenStore) Delete(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return fmt.Errorf("auth filestore: id is empty")
+		return fmt.Errorf("credential filestore: id is empty")
 	}
 	path, err := s.resolveDeletePath(id)
 	if err != nil {
 		return err
 	}
 	if err = os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("auth filestore: delete failed: %w", err)
+		return fmt.Errorf("credential filestore: delete failed: %w", err)
 	}
 	return nil
 }
@@ -176,7 +176,7 @@ func (s *FileTokenStore) resolveDeletePath(id string) (string, error) {
 	}
 	dir := s.baseDirSnapshot()
 	if dir == "" {
-		return "", fmt.Errorf("auth filestore: directory not configured")
+		return "", fmt.Errorf("credential filestore: directory not configured")
 	}
 	return filepath.Join(dir, id), nil
 }
@@ -273,7 +273,7 @@ func (s *FileTokenStore) idFor(path, baseDir string) string {
 
 func (s *FileTokenStore) resolveAuthPath(auth *cliproxyauth.Auth) (string, error) {
 	if auth == nil {
-		return "", fmt.Errorf("auth filestore: auth is nil")
+		return "", fmt.Errorf("credential filestore: auth is nil")
 	}
 	if auth.Attributes != nil {
 		if p := strings.TrimSpace(auth.Attributes["path"]); p != "" {
@@ -290,14 +290,14 @@ func (s *FileTokenStore) resolveAuthPath(auth *cliproxyauth.Auth) (string, error
 		return fileName, nil
 	}
 	if auth.ID == "" {
-		return "", fmt.Errorf("auth filestore: missing id")
+		return "", fmt.Errorf("credential filestore: missing id")
 	}
 	if filepath.IsAbs(auth.ID) {
 		return auth.ID, nil
 	}
 	dir := s.baseDirSnapshot()
 	if dir == "" {
-		return "", fmt.Errorf("auth filestore: directory not configured")
+		return "", fmt.Errorf("credential filestore: directory not configured")
 	}
 	return filepath.Join(dir, auth.ID), nil
 }

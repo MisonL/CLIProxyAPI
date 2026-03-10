@@ -12,12 +12,71 @@ import (
 	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 )
 
+func TestParseImportPayloadAcceptsLegacyV1Snapshot(t *testing.T) {
+	data := []byte(`{"version":1,"usage":{}}`)
+
+	payload, err := ParseImportPayload(data)
+	if err != nil {
+		t.Fatalf("ParseImportPayload() error = %v", err)
+	}
+	if payload.Version != 1 {
+		t.Fatalf("payload.Version = %d, want 1", payload.Version)
+	}
+}
+
 func TestParseImportPayloadRejectsUnsupportedVersion(t *testing.T) {
 	data := []byte(`{"version":99,"usage":{}}`)
 
 	_, err := ParseImportPayload(data)
 	if !errors.Is(err, ErrUnsupportedSnapshotVersion) {
 		t.Fatalf("ParseImportPayload() error = %v, want ErrUnsupportedSnapshotVersion", err)
+	}
+}
+
+func TestPersistenceManagerLoadLegacyV1Snapshot(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "usage-statistics.json")
+	data := []byte(`{
+  "version": 1,
+  "usage": {
+    "apis": {
+      "legacy-key": {
+        "models": {
+          "gpt-5": {
+            "details": [
+              {
+                "timestamp": "2026-03-07T21:00:00Z",
+                "source": "legacy",
+                "auth_index": "legacy-1",
+                "tokens": {
+                  "input_tokens": 2,
+                  "output_tokens": 3,
+                  "total_tokens": 5
+                },
+                "failed": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}`)
+	if err := os.WriteFile(filePath, data, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	stats := NewRequestStatistics()
+	manager := NewPersistenceManager(stats, filePath)
+	result, err := manager.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if result.Added != 1 {
+		t.Fatalf("Load() added = %d, want 1", result.Added)
+	}
+	detail := stats.Snapshot().APIs["legacy-key"].Models["gpt-5"].Details[0]
+	if detail.SelectionKey != "legacy-1" {
+		t.Fatalf("SelectionKey = %q, want %q", detail.SelectionKey, "legacy-1")
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 
 // DoQwenLogin handles the Qwen device flow using the shared authentication manager.
 // It initiates the device-based authentication process for Qwen services and saves
-// the authentication tokens to the configured auth directory.
+// the authentication tokens to the configured credentials directory.
 //
 // Parameters:
 //   - cfg: The application configuration
@@ -22,7 +22,12 @@ func DoQwenLogin(cfg *config.Config, options *LoginOptions) {
 		options = &LoginOptions{}
 	}
 
-	manager := newAuthManager()
+	manager, closeStore, errStore := newAuthManager(cfg)
+	if errStore != nil {
+		fmt.Printf("Qwen authentication setup failed: %v\n", errStore)
+		return
+	}
+	defer closeStore()
 
 	promptFn := options.Prompt
 	if promptFn == nil {
@@ -53,7 +58,7 @@ func DoQwenLogin(cfg *config.Config, options *LoginOptions) {
 	}
 
 	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
+		fmt.Printf("Credential saved as %s\n", savedPath)
 	}
 
 	fmt.Println("Qwen authentication successful!")

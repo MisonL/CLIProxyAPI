@@ -16,7 +16,7 @@ import (
 
 const (
 	// SnapshotVersion identifies the on-disk and export/import JSON schema version.
-	SnapshotVersion = 1
+	SnapshotVersion = 2
 
 	defaultPersistenceFlushInterval = 30 * time.Second
 )
@@ -51,7 +51,7 @@ func ParseImportPayload(data []byte) (ImportPayload, error) {
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return ImportPayload{}, err
 	}
-	if payload.Version != 0 && payload.Version != SnapshotVersion {
+	if payload.Version != 0 && payload.Version != 1 && payload.Version != SnapshotVersion {
 		return ImportPayload{}, fmt.Errorf("%w: %d", ErrUnsupportedSnapshotVersion, payload.Version)
 	}
 	return payload, nil

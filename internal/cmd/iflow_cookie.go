@@ -5,12 +5,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/auth/iflow"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 )
 
 // DoIFlowCookieAuth performs the iFlow cookie-based authentication.
@@ -39,20 +39,31 @@ func DoIFlowCookieAuth(cfg *config.Config, options *LoginOptions) {
 		return
 	}
 
+	ctx := context.Background()
+
+	handle, errStore := newCommandAuthStore(cfg)
+	if errStore != nil {
+		fmt.Printf("Failed to initialize auth store: %v\n", errStore)
+		return
+	}
+	defer func() {
+		if handle.close != nil {
+			_ = handle.close()
+		}
+	}()
+
 	// Check for duplicate BXAuth before authentication
 	bxAuth := iflow.ExtractBXAuth(cookie)
-	if existingFile, err := iflow.CheckDuplicateBXAuth(cfg.AuthDir, bxAuth); err != nil {
+	if existingRef, err := findExistingIFlowCredentialByBXAuth(ctx, handle.store, bxAuth); err != nil {
 		fmt.Printf("Failed to check duplicate: %v\n", err)
 		return
-	} else if existingFile != "" {
-		fmt.Printf("Duplicate BXAuth found, authentication already exists: %s\n", filepath.Base(existingFile))
+	} else if existingRef != "" {
+		fmt.Printf("Duplicate BXAuth found, credential already exists: %s\n", existingRef)
 		return
 	}
 
 	// Authenticate with cookie
 	auth := iflow.NewIFlowAuth(cfg)
-	ctx := context.Background()
-
 	tokenData, err := auth.AuthenticateWithCookie(ctx, cookie)
 	if err != nil {
 		fmt.Printf("iFlow cookie authentication failed: %v\n", err)
@@ -62,18 +73,39 @@ func DoIFlowCookieAuth(cfg *config.Config, options *LoginOptions) {
 	// Create token storage
 	tokenStorage := auth.CreateCookieTokenStorage(tokenData)
 
-	// Get auth file path using email in filename
-	authFilePath := getAuthFilePath(cfg, "iflow", tokenData.Email)
+	identifier := strings.TrimSpace(tokenData.Email)
+	if identifier == "" {
+		identifier = fmt.Sprintf("%d", time.Now().UnixMilli())
+	}
+	tokenStorage.Email = identifier
+	fileName := getIFlowAuthFileName(identifier)
+	record := &coreauth.Auth{
+		ID:       fileName,
+		Provider: "iflow",
+		FileName: fileName,
+		Storage:  tokenStorage,
+		Metadata: map[string]any{
+			"email":        identifier,
+			"api_key":      tokenStorage.APIKey,
+			"expired":      tokenStorage.Expire,
+			"cookie":       tokenStorage.Cookie,
+			"type":         tokenStorage.Type,
+			"last_refresh": tokenStorage.LastRefresh,
+		},
+		Attributes: map[string]string{
+			"api_key": tokenStorage.APIKey,
+		},
+	}
 
-	// Save token to file
-	if err := tokenStorage.SaveTokenToFile(authFilePath); err != nil {
+	credentialRef, err := handle.store.Save(ctx, record)
+	if err != nil {
 		fmt.Printf("Failed to save authentication: %v\n", err)
 		return
 	}
 
 	fmt.Printf("Authentication successful! API key: %s\n", tokenData.APIKey)
 	fmt.Printf("Expires at: %s\n", tokenData.Expire)
-	fmt.Printf("Authentication saved to: %s\n", authFilePath)
+	fmt.Printf("Credential saved as %s\n", credentialRef)
 }
 
 // promptForCookie prompts the user to enter their iFlow cookie
@@ -91,8 +123,46 @@ func promptForCookie(promptFn func(string) (string, error)) (string, error) {
 	return cookie, nil
 }
 
-// getAuthFilePath returns the auth file path for the given provider and email
-func getAuthFilePath(cfg *config.Config, provider, email string) string {
+func getIFlowAuthFileName(email string) string {
 	fileName := iflow.SanitizeIFlowFileName(email)
-	return fmt.Sprintf("%s/%s-%s-%d.json", cfg.AuthDir, provider, fileName, time.Now().Unix())
+	return fmt.Sprintf("iflow-%s-%d.json", fileName, time.Now().Unix())
+}
+
+func findExistingIFlowCredentialByBXAuth(ctx context.Context, store coreauth.Store, bxAuth string) (string, error) {
+	if strings.TrimSpace(bxAuth) == "" || store == nil {
+		return "", nil
+	}
+
+	items, err := store.List(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	for _, item := range items {
+		if item == nil || !strings.EqualFold(item.Provider, "iflow") {
+			continue
+		}
+		if existing := iflow.ExtractBXAuth(strings.TrimSpace(metadataString(item.Metadata, "cookie"))); existing == bxAuth {
+			return firstNonEmpty(item.ID, item.FileName), nil
+		}
+	}
+
+	return "", nil
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	value, _ := metadata[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

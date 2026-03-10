@@ -1,5 +1,5 @@
 // Package vertex provides token storage for Google Vertex AI Gemini via service account credentials.
-// It serialises service account JSON into an auth file that is consumed by the runtime executor.
+// It serialises service account JSON into an credential file that is consumed by the runtime executor.
 package vertex
 
 import (

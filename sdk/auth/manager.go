@@ -62,12 +62,6 @@ func (m *Manager) Login(ctx context.Context, provider string, cfg *config.Config
 		return record, "", nil
 	}
 
-	if cfg != nil {
-		if dirSetter, ok := m.store.(interface{ SetBaseDir(string) }); ok {
-			dirSetter.SetBaseDir(cfg.AuthDir)
-		}
-	}
-
 	savedPath, err := m.store.Save(ctx, record)
 	if err != nil {
 		return record, "", err

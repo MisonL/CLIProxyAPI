@@ -50,8 +50,8 @@ var locales = map[string]map[string]string{
 // ──────────────────────────────────────────
 // Tab names
 // ──────────────────────────────────────────
-var zhTabNames = []string{"仪表盘", "配置", "认证文件", "API 密钥", "OAuth", "使用统计", "日志"}
-var enTabNames = []string{"Dashboard", "Config", "Auth Files", "API Keys", "OAuth", "Usage", "Logs"}
+var zhTabNames = []string{"仪表盘", "配置", "凭证", "API 密钥", "OAuth", "使用统计", "日志"}
+var enTabNames = []string{"Dashboard", "Config", "Credentials", "API Keys", "OAuth", "Usage", "Logs"}
 
 // TabNames returns tab names in the current locale.
 func TabNames() []string {
@@ -99,7 +99,7 @@ var zhStrings = map[string]string{
 	"dashboard_help":   " [r] 刷新 • [↑↓] 滚动",
 	"connected":        "● 已连接",
 	"mgmt_keys":        "管理密钥",
-	"auth_files_label": "认证文件",
+	"auth_files_label": "凭证",
 	"active_suffix":    "活跃",
 	"total_requests":   "请求",
 	"success_label":    "成功",
@@ -134,11 +134,11 @@ var zhStrings = map[string]string{
 	"section_ampcode":   "AMP Code",
 	"section_other":     "其他",
 
-	// ── Auth Files ──
-	"auth_title":      "🔑 认证文件",
+	// ── Credentials ──
+	"auth_title":      "🔑 凭证",
 	"auth_help1":      " [↑↓/jk] 导航 • [Enter] 展开 • [e] 启用/停用 • [d] 删除 • [r] 刷新",
 	"auth_help2":      " [1] 编辑 prefix • [2] 编辑 proxy_url • [3] 编辑 priority",
-	"no_auth_files":   "  无认证文件",
+	"no_auth_files":   "  无凭证",
 	"confirm_delete":  "⚠ 删除 %s? [y/n]",
 	"deleted":         "已删除 %s",
 	"enabled":         "已启用",
@@ -168,7 +168,7 @@ var zhStrings = map[string]string{
 	"oauth_select":       "  选择提供商并按 [Enter] 开始 OAuth 登录:",
 	"oauth_help":         "  [↑↓/jk] 导航 • [Enter] 登录 • [Esc] 清除状态",
 	"oauth_initiating":   "⏳ 正在初始化 %s 登录...",
-	"oauth_success":      "认证成功! 请刷新 Auth Files 标签查看新凭证。",
+	"oauth_success":      "认证成功! 请刷新凭证标签查看新凭证。",
 	"oauth_completed":    "认证流程已完成。",
 	"oauth_failed":       "认证失败",
 	"oauth_timeout":      "OAuth 流程超时 (5 分钟)",
@@ -250,7 +250,7 @@ var enStrings = map[string]string{
 	"dashboard_help":   " [r] Refresh • [↑↓] Scroll",
 	"connected":        "● Connected",
 	"mgmt_keys":        "Mgmt Keys",
-	"auth_files_label": "Auth Files",
+	"auth_files_label": "Credentials",
 	"active_suffix":    "active",
 	"total_requests":   "Requests",
 	"success_label":    "Success",
@@ -285,11 +285,11 @@ var enStrings = map[string]string{
 	"section_ampcode":   "AMP Code",
 	"section_other":     "Other",
 
-	// ── Auth Files ──
-	"auth_title":      "🔑 Auth Files",
+	// ── Credentials ──
+	"auth_title":      "🔑 Credentials",
 	"auth_help1":      " [↑↓/jk] Navigate • [Enter] Expand • [e] Enable/Disable • [d] Delete • [r] Refresh",
 	"auth_help2":      " [1] Edit prefix • [2] Edit proxy_url • [3] Edit priority",
-	"no_auth_files":   "  No auth files found",
+	"no_auth_files":   "  No credentials found",
 	"confirm_delete":  "⚠ Delete %s? [y/n]",
 	"deleted":         "Deleted %s",
 	"enabled":         "Enabled",
@@ -319,7 +319,7 @@ var enStrings = map[string]string{
 	"oauth_select":       "  Select a provider and press [Enter] to start OAuth login:",
 	"oauth_help":         "  [↑↓/jk] Navigate • [Enter] Login • [Esc] Clear status",
 	"oauth_initiating":   "⏳ Initiating %s login...",
-	"oauth_success":      "Authentication successful! Refresh Auth Files tab to see the new credential.",
+	"oauth_success":      "Authentication successful! Refresh the Credentials tab to see the new credential.",
 	"oauth_completed":    "Authentication flow completed.",
 	"oauth_failed":       "Authentication failed",
 	"oauth_timeout":      "OAuth flow timed out (5 minutes)",

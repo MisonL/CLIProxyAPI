@@ -180,7 +180,7 @@ func main() {
 
 	tokenStore := sdkAuth.GetTokenStore()
 	if dirSetter, ok := tokenStore.(interface{ SetBaseDir(string) }); ok {
-		dirSetter.SetBaseDir(cfg.AuthDir)
+		dirSetter.SetBaseDir(cfg.CredentialsDir)
 	}
 	core := coreauth.NewManager(tokenStore, nil, nil)
 	core.RegisterExecutor(MyExecutor{})

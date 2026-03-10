@@ -44,3 +44,14 @@ jobs:
           VERSION: ${{ env.VERSION }}
           COMMIT: ${{ env.COMMIT }}
           BUILD_DATE: ${{ env.BUILD_DATE }}
+
+      - name: Build Docker release bundle
+        run: ./release/build-docker-release.sh "${VERSION}"
+
+      - name: Upload Docker release bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${VERSION}" "dist/CLIProxyAPI_docker_release_${VERSION#v}.tar.gz" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber

@@ -41,7 +41,7 @@ type PostgresStore struct {
 	cfg        PostgresStoreConfig
 	spoolRoot  string
 	configPath string
-	authDir    string
+	credentialsDir    string
 	mu         sync.Mutex
 }
 
@@ -72,12 +72,12 @@ func NewPostgresStore(ctx context.Context, cfg PostgresStoreConfig) (*PostgresSt
 		return nil, fmt.Errorf("postgres store: resolve spool directory: %w", err)
 	}
 	configDir := filepath.Join(absSpool, "config")
-	authDir := filepath.Join(absSpool, "auths")
+	credentialsDir := filepath.Join(absSpool, "credentials")
 	if err = os.MkdirAll(configDir, 0o700); err != nil {
 		return nil, fmt.Errorf("postgres store: create config directory: %w", err)
 	}
-	if err = os.MkdirAll(authDir, 0o700); err != nil {
-		return nil, fmt.Errorf("postgres store: create auth directory: %w", err)
+	if err = os.MkdirAll(credentialsDir, 0o700); err != nil {
+		return nil, fmt.Errorf("postgres store: create credentials directory: %w", err)
 	}
 
 	db, err := sql.Open("pgx", cfg.DSN)
@@ -94,7 +94,7 @@ func NewPostgresStore(ctx context.Context, cfg PostgresStoreConfig) (*PostgresSt
 		cfg:        cfg,
 		spoolRoot:  absSpool,
 		configPath: filepath.Join(configDir, "config.yaml"),
-		authDir:    authDir,
+		credentialsDir:    credentialsDir,
 	}
 	return store, nil
 }
@@ -165,12 +165,12 @@ func (s *PostgresStore) ConfigPath() string {
 	return s.configPath
 }
 
-// AuthDir returns the local directory containing mirrored auth files.
-func (s *PostgresStore) AuthDir() string {
+// CredentialsDir returns the local directory containing mirrored credential files.
+func (s *PostgresStore) CredentialsDir() string {
 	if s == nil {
 		return ""
 	}
-	return s.authDir
+	return s.credentialsDir
 }
 
 // WorkDir exposes the root spool directory used for mirroring.
@@ -209,7 +209,7 @@ func (s *PostgresStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (stri
 	defer s.mu.Unlock()
 
 	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", fmt.Errorf("postgres store: create auth directory: %w", err)
+		return "", fmt.Errorf("postgres store: create credentials directory: %w", err)
 	}
 
 	switch {
@@ -231,10 +231,10 @@ func (s *PostgresStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (stri
 		}
 		tmp := path + ".tmp"
 		if errWrite := os.WriteFile(tmp, raw, 0o600); errWrite != nil {
-			return "", fmt.Errorf("postgres store: write temp auth file: %w", errWrite)
+			return "", fmt.Errorf("postgres store: write temp credential file: %w", errWrite)
 		}
 		if errRename := os.Rename(tmp, path); errRename != nil {
-			return "", fmt.Errorf("postgres store: rename auth file: %w", errRename)
+			return "", fmt.Errorf("postgres store: rename credential file: %w", errRename)
 		}
 	default:
 		return "", fmt.Errorf("postgres store: nothing to persist for %s", auth.ID)
@@ -268,7 +268,7 @@ func (s *PostgresStore) List(ctx context.Context) ([]*cliproxyauth.Auth, error) 
 	}
 	defer rows.Close()
 
-	auths := make([]*cliproxyauth.Auth, 0, 32)
+	credentials := make([]*cliproxyauth.Auth, 0, 32)
 	for rows.Next() {
 		var (
 			id        string
@@ -310,15 +310,15 @@ func (s *PostgresStore) List(ctx context.Context) ([]*cliproxyauth.Auth, error) 
 			LastRefreshedAt:  time.Time{},
 			NextRefreshAfter: time.Time{},
 		}
-		auths = append(auths, auth)
+		credentials = append(credentials, auth)
 	}
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("postgres store: iterate auth rows: %w", err)
 	}
-	return auths, nil
+	return credentials, nil
 }
 
-// Delete removes an auth file and the corresponding database record.
+// Delete removes an credential file and the corresponding database record.
 func (s *PostgresStore) Delete(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -333,7 +333,7 @@ func (s *PostgresStore) Delete(ctx context.Context, id string) error {
 	defer s.mu.Unlock()
 
 	if err = os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("postgres store: delete auth file: %w", err)
+		return fmt.Errorf("postgres store: delete credential file: %w", err)
 	}
 	relID, err := s.relativeAuthID(path)
 	if err != nil {
@@ -342,8 +342,8 @@ func (s *PostgresStore) Delete(ctx context.Context, id string) error {
 	return s.deleteAuthRecord(ctx, relID)
 }
 
-// PersistAuthFiles stores the provided auth file changes in PostgreSQL.
-func (s *PostgresStore) PersistAuthFiles(ctx context.Context, _ string, paths ...string) error {
+// PersistCredentials stores the provided credential file changes in PostgreSQL.
+func (s *PostgresStore) PersistCredentials(ctx context.Context, _ string, paths ...string) error {
 	if len(paths) == 0 {
 		return nil
 	}
@@ -357,10 +357,10 @@ func (s *PostgresStore) PersistAuthFiles(ctx context.Context, _ string, paths ..
 		}
 		relID, err := s.relativeAuthID(trimmed)
 		if err != nil {
-			// Attempt to resolve absolute path under authDir.
+			// Attempt to resolve absolute path under credentialsDir.
 			abs := trimmed
 			if !filepath.IsAbs(abs) {
-				abs = filepath.Join(s.authDir, trimmed)
+				abs = filepath.Join(s.credentialsDir, trimmed)
 			}
 			relID, err = s.relativeAuthID(abs)
 			if err != nil {
@@ -433,7 +433,7 @@ func (s *PostgresStore) syncConfigFromDatabase(ctx context.Context, exampleConfi
 	return nil
 }
 
-// syncAuthFromDatabase populates the local auth directory from PostgreSQL data.
+// syncAuthFromDatabase populates the local credentials directory from PostgreSQL data.
 func (s *PostgresStore) syncAuthFromDatabase(ctx context.Context) error {
 	query := fmt.Sprintf("SELECT id, content FROM %s", s.fullTableName(s.cfg.AuthTable))
 	rows, err := s.db.QueryContext(ctx, query)
@@ -442,11 +442,11 @@ func (s *PostgresStore) syncAuthFromDatabase(ctx context.Context) error {
 	}
 	defer rows.Close()
 
-	if err = os.RemoveAll(s.authDir); err != nil {
-		return fmt.Errorf("postgres store: reset auth directory: %w", err)
+	if err = os.RemoveAll(s.credentialsDir); err != nil {
+		return fmt.Errorf("postgres store: reset credentials directory: %w", err)
 	}
-	if err = os.MkdirAll(s.authDir, 0o700); err != nil {
-		return fmt.Errorf("postgres store: recreate auth directory: %w", err)
+	if err = os.MkdirAll(s.credentialsDir, 0o700); err != nil {
+		return fmt.Errorf("postgres store: recreate credentials directory: %w", err)
 	}
 
 	for rows.Next() {
@@ -466,7 +466,7 @@ func (s *PostgresStore) syncAuthFromDatabase(ctx context.Context) error {
 			return fmt.Errorf("postgres store: create auth subdir: %w", err)
 		}
 		if err = os.WriteFile(path, []byte(payload), 0o600); err != nil {
-			return fmt.Errorf("postgres store: write auth file: %w", err)
+			return fmt.Errorf("postgres store: write credential file: %w", err)
 		}
 	}
 	if err = rows.Err(); err != nil {
@@ -481,7 +481,7 @@ func (s *PostgresStore) syncAuthFile(ctx context.Context, relID, path string) er
 		if errors.Is(err, fs.ErrNotExist) {
 			return s.deleteAuthRecord(ctx, relID)
 		}
-		return fmt.Errorf("postgres store: read auth file: %w", err)
+		return fmt.Errorf("postgres store: read credential file: %w", err)
 	}
 	if len(data) == 0 {
 		return s.deleteAuthRecord(ctx, relID)
@@ -492,7 +492,7 @@ func (s *PostgresStore) syncAuthFile(ctx context.Context, relID, path string) er
 func (s *PostgresStore) upsertAuthRecord(ctx context.Context, relID, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("postgres store: read auth file: %w", err)
+		return fmt.Errorf("postgres store: read credential file: %w", err)
 	}
 	if len(data) == 0 {
 		return s.deleteAuthRecord(ctx, relID)
@@ -557,7 +557,7 @@ func (s *PostgresStore) resolveAuthPath(auth *cliproxyauth.Auth) (string, error)
 		if filepath.IsAbs(fileName) {
 			return fileName, nil
 		}
-		return filepath.Join(s.authDir, fileName), nil
+		return filepath.Join(s.credentialsDir, fileName), nil
 	}
 	if auth.ID == "" {
 		return "", fmt.Errorf("postgres store: missing id")
@@ -565,14 +565,14 @@ func (s *PostgresStore) resolveAuthPath(auth *cliproxyauth.Auth) (string, error)
 	if filepath.IsAbs(auth.ID) {
 		return auth.ID, nil
 	}
-	return filepath.Join(s.authDir, filepath.FromSlash(auth.ID)), nil
+	return filepath.Join(s.credentialsDir, filepath.FromSlash(auth.ID)), nil
 }
 
 func (s *PostgresStore) resolveDeletePath(id string) (string, error) {
 	if strings.ContainsRune(id, os.PathSeparator) || filepath.IsAbs(id) {
 		return id, nil
 	}
-	return filepath.Join(s.authDir, filepath.FromSlash(id)), nil
+	return filepath.Join(s.credentialsDir, filepath.FromSlash(id)), nil
 }
 
 func (s *PostgresStore) relativeAuthID(path string) (string, error) {
@@ -580,10 +580,10 @@ func (s *PostgresStore) relativeAuthID(path string) (string, error) {
 		return "", fmt.Errorf("postgres store: store not initialized")
 	}
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(s.authDir, path)
+		path = filepath.Join(s.credentialsDir, path)
 	}
 	clean := filepath.Clean(path)
-	rel, err := filepath.Rel(s.authDir, clean)
+	rel, err := filepath.Rel(s.credentialsDir, clean)
 	if err != nil {
 		return "", fmt.Errorf("postgres store: compute relative path: %w", err)
 	}
@@ -601,13 +601,13 @@ func (s *PostgresStore) absoluteAuthPath(id string) (string, error) {
 	if strings.HasPrefix(clean, "..") {
 		return "", fmt.Errorf("postgres store: invalid auth identifier %s", id)
 	}
-	path := filepath.Join(s.authDir, clean)
-	rel, err := filepath.Rel(s.authDir, path)
+	path := filepath.Join(s.credentialsDir, clean)
+	rel, err := filepath.Rel(s.credentialsDir, path)
 	if err != nil {
 		return "", err
 	}
 	if strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("postgres store: resolved auth path escapes auth directory")
+		return "", fmt.Errorf("postgres store: resolved auth path escapes credentials directory")
 	}
 	return path, nil
 }

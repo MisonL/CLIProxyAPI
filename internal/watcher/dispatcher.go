@@ -76,23 +76,23 @@ func (w *Watcher) dispatchRuntimeAuthUpdate(update AuthUpdate) bool {
 }
 
 func (w *Watcher) refreshAuthState(force bool) {
-	auths := w.SnapshotCoreAuths()
+	credentials := w.SnapshotCoreAuths()
 	w.clientsMutex.Lock()
 	if len(w.runtimeAuths) > 0 {
 		for _, a := range w.runtimeAuths {
 			if a != nil {
-				auths = append(auths, a.Clone())
+				credentials = append(credentials, a.Clone())
 			}
 		}
 	}
-	updates := w.prepareAuthUpdatesLocked(auths, force)
+	updates := w.prepareAuthUpdatesLocked(credentials, force)
 	w.clientsMutex.Unlock()
 	w.dispatchAuthUpdates(updates)
 }
 
-func (w *Watcher) prepareAuthUpdatesLocked(auths []*coreauth.Auth, force bool) []AuthUpdate {
-	newState := make(map[string]*coreauth.Auth, len(auths))
-	for _, auth := range auths {
+func (w *Watcher) prepareAuthUpdatesLocked(credentials []*coreauth.Auth, force bool) []AuthUpdate {
+	newState := make(map[string]*coreauth.Auth, len(credentials))
+	for _, auth := range credentials {
 		if auth == nil || auth.ID == "" {
 			continue
 		}
@@ -249,10 +249,9 @@ func normalizeAuth(a *coreauth.Auth) *coreauth.Auth {
 	return clone
 }
 
-func snapshotCoreAuths(cfg *config.Config, authDir string) []*coreauth.Auth {
+func snapshotCoreAuths(cfg *config.Config) []*coreauth.Auth {
 	ctx := &synthesizer.SynthesisContext{
 		Config:      cfg,
-		AuthDir:     authDir,
 		Now:         time.Now(),
 		IDGenerator: synthesizer.NewStableIDGenerator(),
 	}
@@ -260,13 +259,8 @@ func snapshotCoreAuths(cfg *config.Config, authDir string) []*coreauth.Auth {
 	var out []*coreauth.Auth
 
 	configSynth := synthesizer.NewConfigSynthesizer()
-	if auths, err := configSynth.Synthesize(ctx); err == nil {
-		out = append(out, auths...)
-	}
-
-	fileSynth := synthesizer.NewFileSynthesizer()
-	if auths, err := fileSynth.Synthesize(ctx); err == nil {
-		out = append(out, auths...)
+	if credentials, err := configSynth.Synthesize(ctx); err == nil {
+		out = append(out, credentials...)
 	}
 
 	return out

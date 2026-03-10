@@ -1,5 +1,5 @@
 // Package management provides the management API handlers and middleware
-// for configuring the server and managing auth files.
+// for configuring the server and managing credentials.
 package management
 
 import (
@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/buildinfo"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/platform"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
@@ -48,6 +49,7 @@ type Handler struct {
 	envSecret           string
 	logDir              string
 	postAuthHook        coreauth.PostAuthHook
+	platformRuntime     *platform.Runtime
 }
 
 // NewHandler creates a new management handler instance.
@@ -132,6 +134,22 @@ func (h *Handler) SetLogDirectory(dir string) {
 // SetPostAuthHook registers a hook to be called after auth record creation but before persistence.
 func (h *Handler) SetPostAuthHook(hook coreauth.PostAuthHook) {
 	h.postAuthHook = hook
+}
+
+// SetTokenStore overrides the token store used by management write flows.
+func (h *Handler) SetTokenStore(store coreauth.Store) {
+	if h == nil || store == nil {
+		return
+	}
+	h.tokenStore = store
+}
+
+// SetPlatformRuntime records whether platform mode is enabled for management write gating.
+func (h *Handler) SetPlatformRuntime(runtime *platform.Runtime) {
+	if h == nil {
+		return
+	}
+	h.platformRuntime = runtime
 }
 
 // Middleware enforces access control for management endpoints.

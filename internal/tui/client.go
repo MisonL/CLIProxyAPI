@@ -145,22 +145,18 @@ func (c *Client) GetUsage() (map[string]any, error) {
 	return c.getJSON("/v0/management/usage")
 }
 
-// GetAuthFiles lists auth credential files.
-// API returns {"files": [...]}.
-func (c *Client) GetAuthFiles() ([]map[string]any, error) {
-	wrapper, err := c.getJSON("/v0/management/auth-files")
-	if err != nil {
-		return nil, err
-	}
-	return extractList(wrapper, "files")
+// GetCredentials lists credentials from the platform API.
+func (c *Client) GetCredentials() ([]map[string]any, error) {
+	return c.getPlatformAuthFiles()
 }
 
-// DeleteAuthFile deletes a single auth file by name.
-func (c *Client) DeleteAuthFile(name string) error {
-	query := url.Values{}
-	query.Set("name", name)
-	path := "/v0/management/auth-files?" + query.Encode()
-	_, code, err := c.doRequest("DELETE", path, nil)
+// DeleteCredential deletes a single credential.
+func (c *Client) DeleteCredential(file map[string]any) error {
+	credentialID := getString(file, "credential_id")
+	if credentialID == "" {
+		return fmt.Errorf("missing credential_id")
+	}
+	_, code, err := c.doRequest("DELETE", "/v2/credentials/"+url.PathEscape(credentialID), nil)
 	if err != nil {
 		return err
 	}
@@ -170,19 +166,52 @@ func (c *Client) DeleteAuthFile(name string) error {
 	return nil
 }
 
-// ToggleAuthFile enables or disables an auth file.
-func (c *Client) ToggleAuthFile(name string, disabled bool) error {
-	body, _ := json.Marshal(map[string]any{"name": name, "disabled": disabled})
-	_, err := c.patch("/v0/management/auth-files/status", strings.NewReader(string(body)))
+// ToggleCredential enables or disables a credential.
+func (c *Client) ToggleCredential(file map[string]any, disabled bool) error {
+	credentialID := getString(file, "credential_id")
+	if credentialID == "" {
+		return fmt.Errorf("missing credential_id")
+	}
+	body, _ := json.Marshal(map[string]any{"disabled": disabled})
+	_, err := c.patch("/v2/credentials/"+url.PathEscape(credentialID)+"/status", strings.NewReader(string(body)))
 	return err
 }
 
-// PatchAuthFileFields updates editable fields on an auth file.
-func (c *Client) PatchAuthFileFields(name string, fields map[string]any) error {
-	fields["name"] = name
-	body, _ := json.Marshal(fields)
-	_, err := c.patch("/v0/management/auth-files/fields", strings.NewReader(string(body)))
+// PatchCredentialFields updates editable fields on a credential.
+func (c *Client) PatchCredentialFields(file map[string]any, fields map[string]any) error {
+	credentialID := getString(file, "credential_id")
+	if credentialID == "" {
+		return fmt.Errorf("missing credential_id")
+	}
+	raw, err := c.get("/v2/credentials/" + url.PathEscape(credentialID) + "/download")
+	if err != nil {
+		return err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return err
+	}
+	for key, value := range fields {
+		payload[key] = value
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = c.put("/v2/credentials/"+url.PathEscape(credentialID)+"/content", strings.NewReader(string(body)))
 	return err
+}
+
+func (c *Client) GetCredentialDetail(file map[string]any) (map[string]any, error) {
+	credentialID := getString(file, "credential_id")
+	if credentialID == "" {
+		return nil, fmt.Errorf("missing credential_id")
+	}
+	wrapper, err := c.getJSON("/v2/credentials/" + url.PathEscape(credentialID))
+	if err != nil {
+		return nil, err
+	}
+	return normalizePlatformCredentialDetail(wrapper), nil
 }
 
 // GetLogs fetches log lines from the server.
@@ -339,6 +368,116 @@ func extractList(wrapper map[string]any, key string) ([]map[string]any, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+func (c *Client) getPlatformAuthFiles() ([]map[string]any, error) {
+	const pageSize = 200
+	files := make([]map[string]any, 0, pageSize)
+	for page := 1; ; page++ {
+		query := url.Values{}
+		query.Set("page", strconv.Itoa(page))
+		query.Set("page_size", strconv.Itoa(pageSize))
+		wrapper, err := c.getJSON("/v2/credentials?" + query.Encode())
+		if err != nil {
+			return nil, err
+		}
+		items, err := extractList(wrapper, "items")
+		if err != nil {
+			return nil, err
+		}
+		if len(items) == 0 {
+			break
+		}
+		for _, item := range items {
+			files = append(files, normalizePlatformAuthFile(item))
+		}
+		total := int(getFloat(wrapper, "total"))
+		if total > 0 && len(files) >= total {
+			break
+		}
+		if len(items) < pageSize {
+			break
+		}
+	}
+	return files, nil
+}
+
+func normalizePlatformAuthFile(item map[string]any) map[string]any {
+	name := getString(item, "credential_name")
+	if name == "" {
+		name = getString(item, "runtime_id")
+	}
+	email := getString(item, "account_email")
+	if email == "" {
+		email = getString(item, "label")
+	}
+	selectionKey := getString(item, "selection_key")
+	runtimeID := getString(item, "runtime_id")
+	return map[string]any{
+		"name":            name,
+		"channel":         getString(item, "provider"),
+		"email":           email,
+		"status":          getString(item, "status"),
+		"status_message":  getString(item, "status_message"),
+		"credential_name": name,
+		"selection_key":   selectionKey,
+		"disabled":        getBool(item, "disabled"),
+		"credential_id":   getString(item, "id"),
+		"runtime_id":      runtimeID,
+		"updated_at":      getString(item, "updated_at"),
+		"last_refresh_at": getString(item, "last_refresh_at"),
+		"platform_backed": true,
+	}
+}
+
+func normalizePlatformCredentialDetail(detail map[string]any) map[string]any {
+	result := map[string]any{}
+	for key, value := range detail {
+		result[key] = value
+	}
+	credentialName := getString(detail, "credential_name")
+	if credentialName != "" {
+		result["name"] = credentialName
+		result["credential_name"] = credentialName
+	}
+	selectionKey := getString(detail, "selection_key")
+	if selectionKey != "" {
+		result["selection_key"] = selectionKey
+	}
+	runtimeID := getString(detail, "runtime_id")
+	if runtimeID != "" {
+		result["runtime_id"] = runtimeID
+	}
+	if channel := getString(detail, "provider"); channel != "" {
+		result["channel"] = channel
+	}
+	if email := getString(detail, "account_email"); email != "" {
+		result["email"] = email
+	} else if label := getString(detail, "label"); label != "" {
+		result["email"] = label
+	}
+	if metadata, ok := detail["metadata"].(map[string]any); ok {
+		if prefix := getString(metadata, "prefix"); prefix != "" {
+			result["prefix"] = prefix
+		}
+		if proxyURL := getString(metadata, "proxy_url"); proxyURL != "" {
+			result["proxy_url"] = proxyURL
+		}
+		if attributes, ok := metadata["attributes"].(map[string]any); ok {
+			if priority := getString(attributes, "priority"); priority != "" {
+				result["priority"] = priority
+			}
+		}
+		if nested, ok := metadata["metadata"].(map[string]any); ok {
+			for _, key := range []string{"project_id", "email", "priority"} {
+				if value := fmt.Sprintf("%v", nested[key]); value != "" && value != "<nil>" {
+					result[key] = value
+				}
+			}
+		}
+	}
+	result["detail_loaded"] = true
+	return result
 }
 
 // GetDebug fetches the current debug setting.

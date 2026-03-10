@@ -3,8 +3,6 @@
 package watcher
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
 	"reflect"
 	"time"
@@ -50,8 +48,7 @@ func (w *Watcher) reloadConfigIfChanged() {
 		log.Debugf("ignoring empty config file write event")
 		return
 	}
-	sum := sha256.Sum256(data)
-	newHash := hex.EncodeToString(sum[:])
+	newHash := configHash(data)
 
 	w.clientsMutex.RLock()
 	currentHash := w.lastConfigHash
@@ -65,8 +62,7 @@ func (w *Watcher) reloadConfigIfChanged() {
 	if w.reloadConfig() {
 		finalHash := newHash
 		if updatedData, errRead := os.ReadFile(w.configPath); errRead == nil && len(updatedData) > 0 {
-			sumUpdated := sha256.Sum256(updatedData)
-			finalHash = hex.EncodeToString(sumUpdated[:])
+			finalHash = configHash(updatedData)
 		} else if errRead != nil {
 			log.WithError(errRead).Debug("failed to compute updated config hash after reload")
 		}
@@ -85,16 +81,6 @@ func (w *Watcher) reloadConfig() bool {
 	if errLoadConfig != nil {
 		log.Errorf("failed to reload config: %v", errLoadConfig)
 		return false
-	}
-
-	if w.mirroredAuthDir != "" {
-		newConfig.AuthDir = w.mirroredAuthDir
-	} else {
-		if resolvedAuthDir, errResolveAuthDir := util.ResolveAuthDir(newConfig.AuthDir); errResolveAuthDir != nil {
-			log.Errorf("failed to resolve auth directory from config: %v", errResolveAuthDir)
-		} else {
-			newConfig.AuthDir = resolvedAuthDir
-		}
 	}
 
 	w.clientsMutex.Lock()
@@ -126,11 +112,10 @@ func (w *Watcher) reloadConfig() bool {
 		}
 	}
 
-	authDirChanged := oldConfig == nil || oldConfig.AuthDir != newConfig.AuthDir
 	retryConfigChanged := oldConfig != nil && (oldConfig.RequestRetry != newConfig.RequestRetry || oldConfig.MaxRetryInterval != newConfig.MaxRetryInterval || oldConfig.MaxRetryCredentials != newConfig.MaxRetryCredentials)
 	forceAuthRefresh := oldConfig != nil && (oldConfig.ForceModelPrefix != newConfig.ForceModelPrefix || !reflect.DeepEqual(oldConfig.OAuthModelAlias, newConfig.OAuthModelAlias) || retryConfigChanged)
 
 	log.Infof("config successfully reloaded, triggering client reload")
-	w.reloadClients(authDirChanged, affectedOAuthProviders, forceAuthRefresh)
+	w.reloadClients(false, affectedOAuthProviders, forceAuthRefresh)
 	return true
 }

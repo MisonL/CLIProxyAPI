@@ -20,7 +20,12 @@ func DoAntigravityLogin(cfg *config.Config, options *LoginOptions) {
 		promptFn = defaultProjectPrompt()
 	}
 
-	manager := newAuthManager()
+	manager, closeStore, errStore := newAuthManager(cfg)
+	if errStore != nil {
+		log.Errorf("Antigravity authentication setup failed: %v", errStore)
+		return
+	}
+	defer closeStore()
 	authOpts := &sdkAuth.LoginOptions{
 		NoBrowser:    options.NoBrowser,
 		CallbackPort: options.CallbackPort,
@@ -35,7 +40,7 @@ func DoAntigravityLogin(cfg *config.Config, options *LoginOptions) {
 	}
 
 	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
+		fmt.Printf("Credential saved as %s\n", savedPath)
 	}
 	if record != nil && record.Label != "" {
 		fmt.Printf("Authenticated as %s\n", record.Label)
